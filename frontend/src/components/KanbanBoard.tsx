@@ -70,6 +70,22 @@ export const KanbanBoard = () => {
     }));
   };
 
+  const handleEditCard = (cardId: string, title: string, details: string) => {
+    setBoard((prev) => {
+      const existing = prev.cards[cardId];
+      if (!existing) {
+        return prev;
+      }
+      return {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [cardId]: { ...existing, title, details },
+        },
+      };
+    });
+  };
+
   const handleDeleteCard = (columnId: string, cardId: string) => {
     setBoard((prev) => {
       return {
@@ -147,6 +163,7 @@ export const KanbanBoard = () => {
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
+                onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
               />
             ))}

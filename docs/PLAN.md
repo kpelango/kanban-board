@@ -54,11 +54,11 @@ Set up the Docker infrastructure, the backend in `backend/` with FastAPI, and wr
 Update so that the frontend is statically built and served, so that the app has the demo Kanban board displayed at `/`. Include inline card editing to satisfy the card-editing business requirement. Comprehensive unit and integration tests.
 
 ### Substeps
-- [ ] Add inline card editing (`onEditCard`) to `KanbanCard.tsx`, `KanbanColumn.tsx`, and `KanbanBoard.tsx` so users can edit an existing card's title and details
-- [ ] Configure `frontend/next.config.ts` with `output: "export"` so `npm run build` outputs static assets to `frontend/out`
-- [ ] Update multi-stage `Dockerfile`: Stage 1 builds the Next.js static export (`frontend/out`); Stage 2 copies `frontend/out` into the FastAPI static directory and serves it at `/`
-- [ ] Update `frontend/playwright.config.ts` so E2E tests can run against the running server (`BASE_URL` defaulting to `http://127.0.0.1:8000` when testing the container or dev server)
-- [ ] Add unit and E2E tests covering card editing in addition to existing column rename, card add/delete, and drag-and-drop tests
+- [x] Add inline card editing (`onEditCard`) to `KanbanCard.tsx`, `KanbanColumn.tsx`, and `KanbanBoard.tsx` so users can edit an existing card's title and details
+- [x] Configure `frontend/next.config.ts` with `output: "export"` so `npm run build` outputs static assets to `frontend/out`
+- [x] Update multi-stage `Dockerfile`: Stage 1 builds the Next.js static export (`frontend/out`); Stage 2 copies `frontend/out` into the FastAPI static directory and serves it at `/`
+- [x] Update `frontend/playwright.config.ts` so E2E tests can run against the running server (`BASE_URL` defaulting to `http://127.0.0.1:8000` when testing the container or dev server)
+- [x] Add unit and E2E tests covering card editing in addition to existing column rename, card add/delete, and drag-and-drop tests
 
 ### Tests & Success Criteria
 - **Frontend Unit Tests**: `npm run test:unit` passes all existing tests plus new tests for editing a card's title and details

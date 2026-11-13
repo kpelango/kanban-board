@@ -18,4 +18,4 @@ def test_root_serves_static_html() -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Hello World" in response.text
+    assert "Kanban Studio" in response.text

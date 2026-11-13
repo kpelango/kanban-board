@@ -16,6 +16,17 @@ test("adds a card to a column", async ({ page }) => {
   await expect(firstColumn.getByText("Playwright card")).toBeVisible();
 });
 
+test("edits a card in a column", async ({ page }) => {
+  await page.goto("/");
+  const firstColumn = page.locator('[data-testid^="column-"]').first();
+  await firstColumn.getByRole("button", { name: "Edit Align roadmap themes", exact: true }).click();
+  await firstColumn.getByLabel("Edit card title").fill("Edited via Playwright");
+  await firstColumn.getByLabel("Edit card details").fill("Updated details via e2e.");
+  await firstColumn.getByRole("button", { name: /^save$/i }).click();
+  await expect(firstColumn.getByText("Edited via Playwright")).toBeVisible();
+  await expect(firstColumn.getByText("Updated details via e2e.")).toBeVisible();
+});
+
 test("moves a card between columns", async ({ page }) => {
   await page.goto("/");
   const card = page.getByTestId("card-card-1");
