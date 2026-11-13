@@ -36,12 +36,12 @@ Enrich this document to plan out each of these parts in detail, with substeps li
 Set up the Docker infrastructure, the backend in `backend/` with FastAPI, and write the start and stop scripts in the `scripts/` directory. This should serve example static HTML to confirm that a "hello world" example works running locally and also make an API call.
 
 ### Substeps
-- [ ] Initialize Python project in `backend/` managed by `uv` (`pyproject.toml`, `.python-version`) with `fastapi`, `uvicorn[standard]`, `pydantic`, `python-dotenv`, `httpx`, and `pytest`
-- [ ] Create `backend/app/main.py` with a FastAPI app exposing `GET /api/health` (returns `{"status": "ok", "message": "Hello from FastAPI"}`) and serving static files at `/`
-- [ ] Create a temporary placeholder `backend/static/index.html` that renders a "Hello World" page and fetches `/api/health` on load to display the API response
-- [ ] Create `Dockerfile` and `.dockerignore` in the project root using `uv` to install dependencies and run `uvicorn` on port `8000`
-- [ ] Write start and stop scripts in `scripts/` for Mac/Linux (`start-mac.sh`, `stop-mac.sh`, `start-linux.sh`, `stop-linux.sh`) and Windows (`start-windows.bat`, `stop-windows.bat` or `.ps1`) that build/run the container with `.env` on port `8000` and stop/remove it cleanly
-- [ ] Update `backend/AGENTS.md` and `scripts/AGENTS.md` describing the backend and script setups
+- [x] Initialize Python project in `backend/` managed by `uv` (`pyproject.toml`, `.python-version`) with `fastapi`, `uvicorn[standard]`, `pydantic`, `python-dotenv`, `httpx`, and `pytest`
+- [x] Create `backend/app/main.py` with a FastAPI app exposing `GET /api/health` (returns `{"status": "ok", "message": "Hello from FastAPI"}`) and serving static files at `/`
+- [x] Create a temporary placeholder `backend/static/index.html` that renders a "Hello World" page and fetches `/api/health` on load to display the API response
+- [x] Create `Dockerfile` and `.dockerignore` in the project root using `uv` to install dependencies and run `uvicorn` on port `8000`
+- [x] Write start and stop scripts in `scripts/` for Mac/Linux (`start-mac.sh`, `stop-mac.sh`, `start-linux.sh`, `stop-linux.sh`) and Windows (`start-windows.bat`, `stop-windows.bat` or `.ps1`) that build/run the container with `.env` on port `8000` and stop/remove it cleanly
+- [x] Update `backend/AGENTS.md` and `scripts/AGENTS.md` describing the backend and script setups
 
 ### Tests & Success Criteria
 - **Backend Unit Tests**: `pytest` in `backend/tests/test_health.py` verifying `GET /api/health` returns `200 OK` and expected JSON, and `GET /` returns `200 OK` with HTML
