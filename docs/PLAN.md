@@ -89,12 +89,12 @@ Update so that on first hitting `/`, you need to log in with dummy credentials (
 Propose a database schema for the Kanban, saving it as JSON. Document the database approach in `docs/` and get user sign-off.
 
 ### Substeps
-- [ ] Create `docs/DATABASE.md` detailing the SQLite database schema and JSON structure:
+- [x] Create `docs/DATABASE.md` detailing the SQLite database schema and JSON structure:
   - `users` table (`id`, `username` UNIQUE, `password_hash`, `created_at`) supporting multiple users for the future while seeding the default `"user"` account
   - `boards` table (`id`, `user_id` UNIQUE FK -> `users.id`, `board_json` TEXT, `updated_at`) storing the user's single Kanban board as a JSON document matching `BoardData` (`columns` array and `cards` dictionary)
   - Future-ready note/design for `chat_messages` table (`id`, `user_id`, `role`, `content`, `created_at`) to be activated in Part 11
   - Initialization and seeding strategy (auto-create tables and seed default user + initial Kanban board on first run if DB file does not exist)
-- [ ] Present `docs/DATABASE.md` to the user and pause for explicit sign-off
+- [x] Present `docs/DATABASE.md` to the user and pause for explicit sign-off
 
 ### Tests & Success Criteria
 - `docs/DATABASE.md` is clear, concise, and covers tables, JSON schema, constraints, and seeding
