@@ -72,10 +72,10 @@ Update so that the frontend is statically built and served, so that the app has 
 Update so that on first hitting `/`, you need to log in with dummy credentials (`"user"`, `"password"`) in order to see the Kanban, and you can log out. Comprehensive tests.
 
 ### Substeps
-- [ ] Add authentication endpoints in FastAPI (`POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`) validating username `"user"` and password `"password"` and setting/clearing a signed HTTP-only session cookie
-- [ ] Build a clean login screen component (`LoginForm.tsx`) styled with the project color scheme (`--navy-dark`, `--primary-blue`, `--secondary-purple`, `--accent-yellow`)
-- [ ] Update the frontend root view to check authentication state (`/api/auth/me`), displaying `LoginForm` when unauthenticated and `KanbanBoard` (with a "Log out" button in the header) when authenticated
-- [ ] Handle invalid credential error states clearly in the login UI
+- [x] Add authentication endpoints in FastAPI (`POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`) validating username `"user"` and password `"password"` and setting/clearing a signed HTTP-only session cookie
+- [x] Build a clean login screen component (`LoginForm.tsx`) styled with the project color scheme (`--navy-dark`, `--primary-blue`, `--secondary-purple`, `--accent-yellow`)
+- [x] Update the frontend root view to check authentication state (`/api/auth/me`), displaying `LoginForm` when unauthenticated and `KanbanBoard` (with a "Log out" button in the header) when authenticated
+- [x] Handle invalid credential error states clearly in the login UI
 
 ### Tests & Success Criteria
 - **Backend Unit Tests**: `pytest` tests for `POST /api/auth/login` (valid credentials succeed and set cookie; invalid credentials return `401`), `GET /api/auth/me` (authenticated vs `401` unauthenticated), and `POST /api/auth/logout` (clears session)

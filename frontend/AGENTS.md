@@ -19,7 +19,9 @@ The `frontend/` directory contains a Next.js 16 (App Router) React 19 TypeScript
   - `page.tsx`: Entry route (`/`) rendering the `KanbanBoard` component.
   - `globals.css`: Defines the color palette CSS variables (`--accent-yellow`, `--primary-blue`, `--secondary-purple`, `--navy-dark`, `--gray-text`, surfaces, and shadows) and base typography rules.
 - `src/components/`
-  - `KanbanBoard.tsx`: Top-level stateful client component (`"use client"`). Manages `BoardData`, configures `@dnd-kit` pointer sensors and `DndContext`, handles drag start/end events, column renaming, card creation, card editing, and card deletion, and renders the board header, five `KanbanColumn` components, and `DragOverlay`.
+  - `LoginForm.tsx`: Client sign-in form posting credentials to `POST /api/auth/login` and displaying validation errors.
+  - `LoginForm.test.tsx`: Vitest tests covering unauthenticated redirect, invalid credentials alert, sign-in transition, and logout.
+  - `KanbanBoard.tsx`: Top-level stateful client component (`"use client"`). Manages `BoardData`, configures `@dnd-kit` pointer sensors and `DndContext`, handles drag start/end events, column renaming, card creation, card editing, and card deletion, and renders the board header (with user badge and logout button), five `KanbanColumn` components, and `DragOverlay`.
   - `KanbanColumn.tsx`: Droppable column container (`useDroppable`) with an editable column title input, card count badge, `SortableContext` list of `KanbanCard` items, empty drop state, and a `NewCardForm` at the bottom.
   - `KanbanCard.tsx`: Draggable/sortable card item (`useSortable`) displaying card title, details, and action controls (edit and remove).
   - `KanbanCardPreview.tsx`: Presentational card component rendered inside `DragOverlay` while dragging.

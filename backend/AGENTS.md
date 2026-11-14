@@ -16,11 +16,11 @@ The `backend/` directory contains a Python FastAPI application managed with `uv`
 
 - `pyproject.toml` & `.python-version`: `uv` project configuration and dependencies.
 - `app/`
-  - `main.py`: FastAPI application entrypoint. Mounts API routes (`/api/health`) and serves static files from `static/` at `/`.
-- `static/`
-  - `index.html`: Static HTML entrypoint served at `/` (replaced in Docker builds with the Next.js static export in Part 3).
+  - `main.py`: FastAPI application entrypoint. Mounts API routes (`/api/health`, `/api/auth/*`) and serves static files from `static/` at `/`.
+  - `auth.py`: Session authentication routes (`POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`) using signed HTTP-only cookies (`itsdangerous`).
 - `tests/`
   - `test_health.py`: Pytest unit tests verifying `/api/health` and static root `/` serving.
+  - `test_auth.py`: Pytest unit tests verifying login, session verification, invalid credentials, and logout.
 
 ## Commands
 

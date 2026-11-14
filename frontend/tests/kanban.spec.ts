@@ -1,13 +1,50 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+const loginAsUser = async (page: Page) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Kanban Studio" })
+  ).toBeVisible();
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+};
+
+test("requires sign in, rejects invalid credentials, preserves session, and logs out", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Kanban Studio" })
+  ).toBeVisible();
+
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("wrong-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText("Invalid username or password")).toBeVisible();
+
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Kanban Studio" })
+  ).toBeVisible();
+});
 
 test("loads the kanban board", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await loginAsUser(page);
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
 
 test("adds a card to a column", async ({ page }) => {
-  await page.goto("/");
+  await loginAsUser(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await firstColumn.getByRole("button", { name: /add a card/i }).click();
   await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
@@ -17,18 +54,22 @@ test("adds a card to a column", async ({ page }) => {
 });
 
 test("edits a card in a column", async ({ page }) => {
-  await page.goto("/");
+  await loginAsUser(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
-  await firstColumn.getByRole("button", { name: "Edit Align roadmap themes", exact: true }).click();
+  await firstColumn
+    .getByRole("button", { name: "Edit Align roadmap themes", exact: true })
+    .click();
   await firstColumn.getByLabel("Edit card title").fill("Edited via Playwright");
-  await firstColumn.getByLabel("Edit card details").fill("Updated details via e2e.");
+  await firstColumn
+    .getByLabel("Edit card details")
+    .fill("Updated details via e2e.");
   await firstColumn.getByRole("button", { name: /^save$/i }).click();
   await expect(firstColumn.getByText("Edited via Playwright")).toBeVisible();
   await expect(firstColumn.getByText("Updated details via e2e.")).toBeVisible();
 });
 
 test("moves a card between columns", async ({ page }) => {
-  await page.goto("/");
+  await loginAsUser(page);
   const card = page.getByTestId("card-card-1");
   const targetColumn = page.getByTestId("column-col-review");
   const cardBox = await card.boundingBox();
@@ -52,7 +93,7 @@ test("moves a card between columns", async ({ page }) => {
 });
 
 test("moves a card into an empty column", async ({ page }) => {
-  await page.goto("/");
+  await loginAsUser(page);
   const discoveryColumn = page.getByTestId("column-col-discovery");
   await discoveryColumn
     .getByRole("button", { name: "Delete Prototype analytics view", exact: true })
