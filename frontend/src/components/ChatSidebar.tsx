@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import clsx from "clsx";
-import { sendChatMessage, type ChatMessage } from "@/lib/api";
+import {
+  clearChatHistory,
+  fetchChatHistory,
+  sendChatMessage,
+  type ChatMessage,
+} from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type ChatSidebarProps = {
@@ -21,9 +26,34 @@ export const ChatSidebar = ({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    let active = true;
+    fetchChatHistory()
+      .then((storedMessages) => {
+        if (active) {
+          setMessages(storedMessages);
+        }
+      })
+      .catch(() => {
+        // Keep current in-memory messages if endpoint is unavailable in isolated unit tests
+      });
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
+
   if (!isOpen) {
     return null;
   }
+
+  const handleClearChat = async () => {
+    await clearChatHistory().catch(() => null);
+    setMessages([]);
+    setError(null);
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -76,14 +106,26 @@ export const ChatSidebar = ({
             Project Assistant
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close AI Assistant"
-          className="rounded-full border border-[var(--stroke)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--navy-dark)] hover:text-[var(--navy-dark)]"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearChat}
+              aria-label="Clear chat history"
+              className="rounded-full border border-[var(--stroke)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--navy-dark)] hover:text-[var(--navy-dark)]"
+            >
+              Clear chat
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close AI Assistant"
+            className="rounded-full border border-[var(--stroke)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--navy-dark)] hover:text-[var(--navy-dark)]"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       <div

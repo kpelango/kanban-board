@@ -174,6 +174,63 @@ def test_chat_with_board_update_persists_new_board(
     assert "card-99" in persisted_board.columns[0].cardIds
 
 
+def test_chat_history_persists_in_sqlite_and_can_be_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    captured_calls: list[dict] = []
+
+    def fake_post(url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
+        captured_calls.append(json)
+        turn = len(captured_calls)
+        ai_payload = {
+            "assistant_message": f"Assistant reply {turn}",
+            "updated_board": None,
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json_lib_dumps(ai_payload)}}]},
+            request=httpx.Request("POST", url),
+        )
+
+    json_lib_dumps = json.dumps
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    client = TestClient(app)
+    client.post("/api/auth/login", json={"username": "user", "password": "password"})
+
+    # Initially empty
+    hist_res = client.get("/api/chat/history")
+    assert hist_res.status_code == 200
+    assert hist_res.json() == {"messages": []}
+
+    # Turn 1
+    res1 = client.post("/api/chat", json={"message": "First question", "history": []})
+    assert res1.status_code == 200
+
+    hist_after_1 = client.get("/api/chat/history").json()["messages"]
+    assert hist_after_1 == [
+        {"role": "user", "content": "First question"},
+        {"role": "assistant", "content": "Assistant reply 1"},
+    ]
+
+    # Turn 2 (even if client sends empty history, DB history is loaded automatically)
+    res2 = client.post("/api/chat", json={"message": "Second question", "history": []})
+    assert res2.status_code == 200
+    second_call_messages = captured_calls[1]["messages"]
+    assert second_call_messages[1] == {"role": "user", "content": "First question"}
+    assert second_call_messages[2] == {
+        "role": "assistant",
+        "content": "Assistant reply 1",
+    }
+    assert second_call_messages[3] == {"role": "user", "content": "Second question"}
+
+    # Clear history
+    del_res = client.delete("/api/chat/history")
+    assert del_res.status_code == 200
+    assert client.get("/api/chat/history").json() == {"messages": []}
+
+
 @pytest.mark.live_ai
 def test_live_openrouter_two_plus_two() -> None:
     if not os.getenv("OPENROUTER_API_KEY"):

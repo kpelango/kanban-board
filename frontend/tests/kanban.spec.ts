@@ -169,10 +169,11 @@ test("moves a card into an empty column and persists across reload", async ({
   ).toBeVisible();
 });
 
-test("opens AI chat sidebar, chats with assistant, and updates board automatically", async ({
+test("opens AI chat sidebar, chats with assistant, updates board, and persists/clears chat history", async ({
   page,
 }) => {
   await loginAsUser(page);
+  await page.request.delete("/api/chat/history");
 
   const updatedBoard = JSON.parse(JSON.stringify(initialData)) as typeof initialData;
   updatedBoard.cards["card-ai-1"] = {
@@ -182,12 +183,39 @@ test("opens AI chat sidebar, chats with assistant, and updates board automatical
   };
   updatedBoard.columns[0].cardIds.push("card-ai-1");
 
+  let storedMessages: Array<{ role: string; content: string }> = [];
+
+  await page.route("**/api/chat/history", async (route) => {
+    if (route.request().method() === "DELETE") {
+      storedMessages = [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "cleared" }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ messages: storedMessages }),
+    });
+  });
+
   await page.route("**/api/chat", async (route) => {
+    const reqBody = JSON.parse(route.request().postData() || "{}") as {
+      message: string;
+    };
+    const reply = "I have added AI Roadmap Milestone to your Backlog.";
+    storedMessages.push(
+      { role: "user", content: reqBody.message },
+      { role: "assistant", content: reply }
+    );
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        reply: "I have added AI Roadmap Milestone to your Backlog.",
+        reply,
         board: updatedBoard,
       }),
     });
@@ -208,4 +236,19 @@ test("opens AI chat sidebar, chats with assistant, and updates board automatical
 
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await expect(firstColumn.getByText("AI Roadmap Milestone")).toBeVisible();
+
+  // Reload page and reopen sidebar to verify chat history is loaded from /api/chat/history
+  await page.reload();
+  await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
+  await page.getByRole("button", { name: "AI Assistant" }).click();
+  const reloadedSidebar = page.getByTestId("ai-chat-sidebar");
+  await expect(
+    reloadedSidebar.getByText("I have added AI Roadmap Milestone to your Backlog.")
+  ).toBeVisible();
+
+  // Clear chat history
+  await reloadedSidebar.getByRole("button", { name: "Clear chat history" }).click();
+  await expect(
+    reloadedSidebar.getByText("Ask about your board or request changes.")
+  ).toBeVisible();
 });

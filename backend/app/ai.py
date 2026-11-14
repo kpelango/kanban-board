@@ -7,10 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, ValidationError
 
 from app.auth import get_current_username
-from app.db import get_board_for_user, save_board_for_user
+from app.db import (
+    append_chat_messages_for_user,
+    clear_chat_history_for_user,
+    get_board_for_user,
+    get_chat_history_for_user,
+    save_board_for_user,
+)
 from app.schemas import (
     AIChatStructuredOutput,
     BoardData,
+    ChatHistoryResponse,
     ChatMessage,
     ChatRequest,
     ChatResponse,
@@ -172,19 +179,43 @@ def test_ai_connectivity(
     return AIPromptResponse(reply=reply)
 
 
+@chat_router.get("/history", response_model=ChatHistoryResponse)
+def read_chat_history(
+    username: str = Depends(get_current_username),
+) -> ChatHistoryResponse:
+    return ChatHistoryResponse(messages=get_chat_history_for_user(username))
+
+
+@chat_router.delete("/history")
+def delete_chat_history(
+    username: str = Depends(get_current_username),
+) -> dict[str, str]:
+    clear_chat_history_for_user(username)
+    return {"status": "cleared"}
+
+
 @chat_router.post("", response_model=ChatResponse)
 def chat_with_ai(
     payload: ChatRequest,
     username: str = Depends(get_current_username),
 ) -> ChatResponse:
     current_board = get_board_for_user(username)
+    stored_history = get_chat_history_for_user(username)
+    effective_history = stored_history if stored_history else payload.history
     ai_output = run_kanban_chat(
         board=current_board,
         message=payload.message,
-        history=payload.history,
+        history=effective_history,
     )
     if ai_output.updated_board is not None:
         save_board_for_user(username, ai_output.updated_board)
+    append_chat_messages_for_user(
+        username,
+        [
+            ChatMessage(role="user", content=payload.message),
+            ChatMessage(role="assistant", content=ai_output.assistant_message),
+        ],
+    )
     return ChatResponse(
         reply=ai_output.assistant_message,
         board=ai_output.updated_board,

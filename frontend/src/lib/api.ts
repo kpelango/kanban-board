@@ -47,3 +47,19 @@ export const sendChatMessage = async (
   }
   return (await response.json()) as ChatResponse;
 };
+
+export const fetchChatHistory = async (): Promise<ChatMessage[]> => {
+  const response = await fetch("/api/chat/history");
+  if (!response.ok) {
+    throw new Error("Failed to load chat history");
+  }
+  const data = (await response.json()) as { messages: ChatMessage[] };
+  return data.messages;
+};
+
+export const clearChatHistory = async (): Promise<void> => {
+  const response = await fetch("/api/chat/history", { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error("Failed to clear chat history");
+  }
+};

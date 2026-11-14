@@ -94,9 +94,9 @@ On FastAPI startup (or first database access):
 3. Insert default user `"user"` if not present.
 4. Insert default `boards` row for `"user"` populated with the seed `initialData` JSON if no board exists for that user.
 
-## Future Extension (Part 11: Persistent Chat History)
+## Persistent Chat History (`chat_messages`)
 
-In Part 11, conversation history will move from browser memory into SQLite by adding a `chat_messages` table:
+Conversation history is persisted per user in the `chat_messages` table (created automatically alongside `users` and `boards` on startup):
 
 ```sql
 CREATE TABLE IF NOT EXISTS chat_messages (

@@ -71,6 +71,10 @@ class AIChatStructuredOutput(BaseModel):
     updated_board: BoardData | None = None
 
 
+class ChatHistoryResponse(BaseModel):
+    messages: list[ChatMessage]
+
+
 class ChatResponse(BaseModel):
     reply: str
     board: BoardData | None = None

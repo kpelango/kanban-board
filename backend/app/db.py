@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from app.schemas import BoardData, INITIAL_BOARD_DATA
+from app.schemas import BoardData, ChatMessage, INITIAL_BOARD_DATA
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "pm.db"
 
@@ -81,6 +81,18 @@ def init_db(db_path: Path | None = None) -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            );
+            """
+        )
         ensure_user_with_default_board(conn, "user", "password")
         conn.commit()
 
@@ -127,3 +139,47 @@ def save_board_for_user(
         )
         conn.commit()
     return board
+
+
+def get_chat_history_for_user(
+    username: str, db_path: Path | None = None
+) -> list[ChatMessage]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        user_id = ensure_user_with_default_board(conn, username)
+        conn.commit()
+        rows = conn.execute(
+            "SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id ASC",
+            (user_id,),
+        ).fetchall()
+        return [
+            ChatMessage(role=str(row["role"]), content=str(row["content"]))
+            for row in rows
+        ]
+
+
+def append_chat_messages_for_user(
+    username: str,
+    messages: list[ChatMessage],
+    db_path: Path | None = None,
+) -> None:
+    if not messages:
+        return
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        user_id = ensure_user_with_default_board(conn, username)
+        conn.executemany(
+            "INSERT INTO chat_messages (user_id, role, content) VALUES (?, ?, ?)",
+            [(user_id, msg.role, msg.content) for msg in messages],
+        )
+        conn.commit()
+
+
+def clear_chat_history_for_user(
+    username: str, db_path: Path | None = None
+) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        user_id = ensure_user_with_default_board(conn, username)
+        conn.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+        conn.commit()

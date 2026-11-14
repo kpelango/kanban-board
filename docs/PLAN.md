@@ -203,9 +203,9 @@ Add a beautiful sidebar widget to the UI supporting full AI chat, and allowing t
 Convert the chat history from browser-only memory to be stored in the SQLite database per user so conversation history survives page reloads and sessions.
 
 ### Substeps
-- [ ] Add a `chat_messages` table (`id`, `user_id` FK -> `users.id`, `role`, `content`, `created_at`) to `backend/app/db.py` and `docs/DATABASE.md`
-- [ ] Add `GET /api/chat/history` and `DELETE /api/chat/history` (clear chat) endpoints, and update `POST /api/chat` to load recent conversation history from SQLite and append both the user message and assistant reply to `chat_messages`
-- [ ] Update `ChatSidebar.tsx` to load existing messages from `GET /api/chat/history` on mount and provide a "Clear chat" action
+- [x] Add a `chat_messages` table (`id`, `user_id` FK -> `users.id`, `role`, `content`, `created_at`) to `backend/app/db.py` and `docs/DATABASE.md`
+- [x] Add `GET /api/chat/history` and `DELETE /api/chat/history` (clear chat) endpoints, and update `POST /api/chat` to load recent conversation history from SQLite and append both the user message and assistant reply to `chat_messages`
+- [x] Update `ChatSidebar.tsx` to load existing messages from `GET /api/chat/history` on mount and provide a "Clear chat" action
 
 ### Tests & Success Criteria
 - **Backend Unit Tests**: `pytest` tests verifying messages are persisted per user in `chat_messages`, loaded automatically in subsequent `POST /api/chat` turns, returned by `GET /api/chat/history`, and cleared by `DELETE /api/chat/history`

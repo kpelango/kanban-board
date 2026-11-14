@@ -107,6 +107,16 @@ describe("KanbanBoard", () => {
     const fetchSpy = vi
       .spyOn(global, "fetch")
       .mockImplementation(async (input, init) => {
+        if (input === "/api/chat/history") {
+          if (init?.method === "DELETE") {
+            return new Response(JSON.stringify({ status: "cleared" }), {
+              status: 200,
+            });
+          }
+          return new Response(JSON.stringify({ messages: [] }), {
+            status: 200,
+          });
+        }
         if (input === "/api/chat" && init?.method === "POST") {
           const parsedBody = JSON.parse(init.body as string) as {
             message: string;
@@ -158,5 +168,13 @@ describe("KanbanBoard", () => {
 
     const firstColumn = getFirstColumn();
     expect(within(firstColumn).getByText("AI Generated Task")).toBeInTheDocument();
+
+    const clearButton = within(sidebar).getByRole("button", {
+      name: /clear chat history/i,
+    });
+    await userEvent.click(clearButton);
+    expect(
+      within(sidebar).queryByText("Added AI Generated Task to Backlog.")
+    ).not.toBeInTheDocument();
   });
 });
