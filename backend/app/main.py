@@ -5,12 +5,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.ai import router as ai_router
 from app.auth import router as auth_router
 from app.board import router as board_router
 from app.db import init_db
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT_DIR / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -24,6 +26,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Kanban Studio API", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(board_router)
+app.include_router(ai_router)
 
 
 @app.get("/api/health")

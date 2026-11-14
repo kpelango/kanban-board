@@ -21,3 +21,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-m 'not live_ai'"
+markers = [
+    "live_ai: marks tests that call the live OpenRouter API",
+]

@@ -21,10 +21,12 @@ The `backend/` directory contains a Python FastAPI application managed with `uv`
   - `db.py`: SQLite persistence module (`users` and `boards` tables), automatic DB creation and default user/board seeding, and per-user board read/write helpers.
   - `schemas.py`: Pydantic models (`Card`, `Column`, `BoardData`) validating the 5 fixed column IDs and card reference integrity.
   - `board.py`: Authenticated board routes (`GET /api/board`, `PUT /api/board`).
+  - `ai.py`: OpenRouter integration (`openai/gpt-oss-120b`) and connectivity endpoint (`POST /api/ai/test`).
 - `tests/`
   - `test_health.py`: Pytest unit tests verifying `/api/health` and static root `/` serving.
   - `test_auth.py`: Pytest unit tests verifying login, session verification, invalid credentials, and logout.
   - `test_board.py`: Pytest unit tests verifying SQLite auto-creation, board read/write persistence, schema validation (`422`), authentication checks (`401`), and multi-user isolation.
+  - `test_ai.py`: Pytest unit tests (mocked HTTP) and opt-in `@pytest.mark.live_ai` live connectivity test for OpenRouter (`openai/gpt-oss-120b`).
 
 ## Commands
 

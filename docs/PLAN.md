@@ -146,9 +146,9 @@ Have the frontend actually use the backend API, so that the app is a proper pers
 Allow the backend to make an AI call via OpenRouter. Test connectivity with a simple "2+2" test and ensure the AI call is working.
 
 ### Substeps
-- [ ] Implement `backend/app/ai.py` to call OpenRouter (`https://openrouter.ai/api/v1/chat/completions` or via the `openai` SDK configured with OpenRouter base URL) using `OPENROUTER_API_KEY` from `.env` and model `openai/gpt-oss-120b`
-- [ ] Add a simple connectivity function and endpoint/test helper to send a prompt (e.g., `"What is 2+2? Reply with just the number."`) and return the model's response
-- [ ] Ensure `.env` is loaded in both local `pytest` runs and the Docker container
+- [x] Implement `backend/app/ai.py` to call OpenRouter (`https://openrouter.ai/api/v1/chat/completions` or via the `openai` SDK configured with OpenRouter base URL) using `OPENROUTER_API_KEY` from `.env` and model `openai/gpt-oss-120b`
+- [x] Add a simple connectivity function and endpoint/test helper to send a prompt (e.g., `"What is 2+2? Reply with just the number."`) and return the model's response
+- [x] Ensure `.env` is loaded in both local `pytest` runs and the Docker container
 
 ### Tests & Success Criteria
 - **Backend Unit Tests**: `pytest` unit test with mocked OpenRouter HTTP response verifying request headers, model name (`openai/gpt-oss-120b`), and error handling when `OPENROUTER_API_KEY` is missing or upstream fails
