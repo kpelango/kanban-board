@@ -107,12 +107,12 @@ Propose a database schema for the Kanban, saving it as JSON. Document the databa
 Add API routes to allow the backend to read and change the Kanban for a given user; test this thoroughly with backend unit tests. The database should be created if it doesn't exist.
 
 ### Substeps
-- [ ] Implement SQLite database module (`backend/app/db.py`) that automatically creates the SQLite file and tables on startup if they do not exist, and seeds the default `"user"` account with `initialData` board JSON
-- [ ] Define Pydantic models (`backend/app/schemas.py`) for `Card`, `Column`, and `BoardData` (enforcing the 5 fixed column IDs and valid card references)
-- [ ] Implement authenticated routes in FastAPI:
+- [x] Implement SQLite database module (`backend/app/db.py`) that automatically creates the SQLite file and tables on startup if they do not exist, and seeds the default `"user"` account with `initialData` board JSON
+- [x] Define Pydantic models (`backend/app/schemas.py`) for `Card`, `Column`, and `BoardData` (enforcing the 5 fixed column IDs and valid card references)
+- [x] Implement authenticated routes in FastAPI:
   - `GET /api/board`: Returns the current logged-in user's `BoardData` JSON from SQLite
   - `PUT /api/board`: Validates and saves the updated `BoardData` JSON for the logged-in user in SQLite
-- [ ] Configure Docker run script / volume mount so the SQLite database file persists in a local `data/` directory across container restarts
+- [x] Configure Docker run script / volume mount so the SQLite database file persists in a local `data/` directory across container restarts
 
 ### Tests & Success Criteria
 - **Backend Unit Tests**: Thorough `pytest` suite using an isolated temporary SQLite database testing:

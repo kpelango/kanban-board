@@ -3,6 +3,8 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 
+from app.db import verify_user_credentials
+
 SESSION_COOKIE_NAME = "pm_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "pm-mvp-local-secret-key")
@@ -58,7 +60,11 @@ def get_current_username(
 
 @router.post("/login", response_model=UserResponse)
 def login(payload: LoginRequest, response: Response) -> UserResponse:
-    if payload.username != VALID_USERNAME or payload.password != VALID_PASSWORD:
+    if (
+        payload.username != VALID_USERNAME
+        or payload.password != VALID_PASSWORD
+        or not verify_user_credentials(payload.username, payload.password)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
