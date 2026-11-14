@@ -1,13 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 import { initialData } from "../src/lib/kanban";
 
+const E2E_USERNAME = "e2e-test-user";
+const E2E_PASSWORD = "password";
+
 const loginAsUser = async (page: Page, resetBoard = true) => {
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Sign in to Kanban Studio" })
   ).toBeVisible();
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
+  await page.getByLabel("Username").fill(E2E_USERNAME);
+  await page.getByLabel("Password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
 
@@ -27,12 +30,12 @@ test("requires sign in, rejects invalid credentials, preserves session, and logs
     page.getByRole("heading", { name: "Sign in to Kanban Studio" })
   ).toBeVisible();
 
-  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Username").fill(E2E_USERNAME);
   await page.getByLabel("Password").fill("wrong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText("Invalid username or password")).toBeVisible();
 
-  await page.getByLabel("Password").fill("password");
+  await page.getByLabel("Password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);

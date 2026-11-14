@@ -94,6 +94,7 @@ def init_db(db_path: Path | None = None) -> None:
             """
         )
         ensure_user_with_default_board(conn, "user", "password")
+        ensure_user_with_default_board(conn, "e2e-test-user", "password")
         conn.commit()
 
 
