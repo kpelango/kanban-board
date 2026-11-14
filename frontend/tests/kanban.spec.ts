@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { initialData } from "../src/lib/kanban";
 
-const loginAsUser = async (page: Page) => {
+const loginAsUser = async (page: Page, resetBoard = true) => {
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Sign in to Kanban Studio" })
@@ -8,7 +9,14 @@ const loginAsUser = async (page: Page) => {
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
+
+  if (resetBoard) {
+    const res = await page.request.put("/api/board", { data: initialData });
+    expect(res.ok()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
+  }
 };
 
 test("requires sign in, rejects invalid credentials, preserves session, and logs out", async ({
@@ -43,7 +51,7 @@ test("loads the kanban board", async ({ page }) => {
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
 
-test("adds a card to a column", async ({ page }) => {
+test("adds a card to a column and persists across reload", async ({ page }) => {
   await loginAsUser(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await firstColumn.getByRole("button", { name: /add a card/i }).click();
@@ -51,9 +59,14 @@ test("adds a card to a column", async ({ page }) => {
   await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
   await firstColumn.getByRole("button", { name: /add card/i }).click();
   await expect(firstColumn.getByText("Playwright card")).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.locator('[data-testid^="column-"]').first().getByText("Playwright card")
+  ).toBeVisible();
 });
 
-test("edits a card in a column", async ({ page }) => {
+test("edits a card in a column and persists across reload", async ({ page }) => {
   await loginAsUser(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await firstColumn
@@ -66,9 +79,18 @@ test("edits a card in a column", async ({ page }) => {
   await firstColumn.getByRole("button", { name: /^save$/i }).click();
   await expect(firstColumn.getByText("Edited via Playwright")).toBeVisible();
   await expect(firstColumn.getByText("Updated details via e2e.")).toBeVisible();
+
+  await page.reload();
+  const reloadedFirstColumn = page.locator('[data-testid^="column-"]').first();
+  await expect(reloadedFirstColumn.getByText("Edited via Playwright")).toBeVisible();
+  await expect(
+    reloadedFirstColumn.getByText("Updated details via e2e.")
+  ).toBeVisible();
 });
 
-test("moves a card between columns", async ({ page }) => {
+test("moves a card between columns and persists across reload and logout/login", async ({
+  page,
+}) => {
   await loginAsUser(page);
   const card = page.getByTestId("card-card-1");
   const targetColumn = page.getByTestId("column-col-review");
@@ -88,11 +110,32 @@ test("moves a card between columns", async ({ page }) => {
     columnBox.y + 120,
     { steps: 12 }
   );
+  const savePromise = page.waitForResponse(
+    (res) => res.url().endsWith("/api/board") && res.request().method() === "PUT"
+  );
   await page.mouse.up();
+  await savePromise;
   await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
+  await expect(
+    page.getByTestId("column-col-review").getByTestId("card-card-1")
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Kanban Studio" })
+  ).toBeVisible();
+  await loginAsUser(page, false);
+  await expect(
+    page.getByTestId("column-col-review").getByTestId("card-card-1")
+  ).toBeVisible();
 });
 
-test("moves a card into an empty column", async ({ page }) => {
+test("moves a card into an empty column and persists across reload", async ({
+  page,
+}) => {
   await loginAsUser(page);
   const discoveryColumn = page.getByTestId("column-col-discovery");
   await discoveryColumn
@@ -119,4 +162,9 @@ test("moves a card into an empty column", async ({ page }) => {
   );
   await page.mouse.up();
   await expect(discoveryColumn.getByTestId("card-card-1")).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByTestId("column-col-discovery").getByTestId("card-card-1")
+  ).toBeVisible();
 });

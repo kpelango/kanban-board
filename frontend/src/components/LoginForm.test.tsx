@@ -62,6 +62,11 @@ describe("Authentication and LoginForm flow", () => {
       })
     );
     fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ columns: [], cards: {} }), {
+        status: 500,
+      })
+    );
+    fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ status: "logged_out" }), {
         status: 200,
       })

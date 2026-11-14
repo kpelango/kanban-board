@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { fetchBoard, saveBoard } from "@/lib/api";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 const collisionDetectionStrategy: CollisionDetection = (args) => {
@@ -32,7 +33,43 @@ type KanbanBoardProps = {
 
 export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchBoard()
+      .then((remoteBoard) => {
+        if (active) {
+          setBoard(remoteBoard);
+          setSyncError(null);
+        }
+      })
+      .catch(() => {
+        // Keep initialData fallback when offline or in isolated component tests
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoaded(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const updateAndPersistBoard = (updater: (prev: BoardData) => BoardData) => {
+    setBoard((prev) => {
+      const next = updater(prev);
+      if (next !== prev) {
+        void saveBoard(next)
+          .then(() => setSyncError(null))
+          .catch(() => setSyncError("Failed to save changes to server."));
+      }
+      return next;
+    });
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -54,14 +91,14 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
       return;
     }
 
-    setBoard((prev) => ({
+    updateAndPersistBoard((prev) => ({
       ...prev,
       columns: moveCard(prev.columns, active.id as string, over.id as string),
     }));
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
+    updateAndPersistBoard((prev) => ({
       ...prev,
       columns: prev.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
@@ -71,7 +108,7 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
+    updateAndPersistBoard((prev) => ({
       ...prev,
       cards: {
         ...prev.cards,
@@ -86,7 +123,7 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
   };
 
   const handleEditCard = (cardId: string, title: string, details: string) => {
-    setBoard((prev) => {
+    updateAndPersistBoard((prev) => {
       const existing = prev.cards[cardId];
       if (!existing) {
         return prev;
@@ -102,7 +139,7 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
+    updateAndPersistBoard((prev) => {
       return {
         ...prev,
         cards: Object.fromEntries(
@@ -123,7 +160,10 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
   return (
-    <div className="relative overflow-hidden">
+    <div
+      className="relative overflow-hidden"
+      data-testid={isLoaded ? "kanban-board-loaded" : "kanban-board-loading"}
+    >
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
 
@@ -180,6 +220,11 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
               </div>
             ))}
           </div>
+          {syncError && (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700">
+              {syncError}
+            </p>
+          )}
         </header>
 
         <DndContext
@@ -201,13 +246,13 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
               />
             ))}
           </section>
-          <DragOverlay>
-            {activeCard ? (
-              <div className="w-[260px]">
-                <KanbanCardPreview card={activeCard} />
-              </div>
-            ) : null}
-          </DragOverlay>
+            <DragOverlay style={{ pointerEvents: "none" }}>
+              {activeCard ? (
+                <div className="pointer-events-none w-[260px]">
+                  <KanbanCardPreview card={activeCard} />
+                </div>
+              ) : null}
+            </DragOverlay>
         </DndContext>
       </main>
     </div>

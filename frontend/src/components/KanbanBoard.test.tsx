@@ -1,25 +1,50 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { initialData } from "@/lib/kanban";
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 describe("KanbanBoard", () => {
-  it("renders five columns", () => {
-    render(<KanbanBoard />);
-    expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
+  beforeEach(() => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      if (init?.method === "PUT") {
+        return new Response(init.body as BodyInit, { status: 200 });
+      }
+      return new Response(JSON.stringify(initialData), { status: 200 });
+    });
   });
 
-  it("renames a column", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders five columns and loads initial board from /api/board", async () => {
     render(<KanbanBoard />);
+    expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/board");
+    });
+  });
+
+  it("renames a column and persists to /api/board", async () => {
+    render(<KanbanBoard />);
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/board");
+    });
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
     await userEvent.clear(input);
     await userEvent.type(input, "New Name");
     expect(input).toHaveValue("New Name");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/board",
+      expect.objectContaining({ method: "PUT" })
+    );
   });
 
-  it("adds and removes a card", async () => {
+  it("adds and removes a card and persists changes", async () => {
     render(<KanbanBoard />);
     const column = getFirstColumn();
     const addButton = within(column).getByRole("button", {
@@ -44,7 +69,7 @@ describe("KanbanBoard", () => {
     expect(within(column).queryByText("New card")).not.toBeInTheDocument();
   });
 
-  it("edits an existing card title and details", async () => {
+  it("edits an existing card title and details and persists to /api/board", async () => {
     render(<KanbanBoard />);
     const column = getFirstColumn();
     const editButton = within(column).getByRole("button", {
@@ -64,5 +89,9 @@ describe("KanbanBoard", () => {
 
     expect(within(column).getByText("Updated roadmap themes")).toBeInTheDocument();
     expect(within(column).getByText("Updated quarterly metrics.")).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/board",
+      expect.objectContaining({ method: "PUT" })
+    );
   });
 });

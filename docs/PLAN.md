@@ -129,9 +129,9 @@ Add API routes to allow the backend to read and change the Kanban for a given us
 Have the frontend actually use the backend API, so that the app is a proper persistent Kanban board. Test very thoroughly.
 
 ### Substeps
-- [ ] Create an API client module (`frontend/src/lib/api.ts`) for auth (`/api/auth/*`) and board persistence (`GET /api/board`, `PUT /api/board`)
-- [ ] Update `KanbanBoard.tsx` to load initial board state from `GET /api/board` after login and persist board mutations (column rename, card add, card edit, card delete, card drag-and-drop move) via `PUT /api/board` with optimistic UI updates and error handling
-- [ ] Ensure loading and error states are clean and unobtrusive
+- [x] Create an API client module (`frontend/src/lib/api.ts`) for auth (`/api/auth/*`) and board persistence (`GET /api/board`, `PUT /api/board`)
+- [x] Update `KanbanBoard.tsx` to load initial board state from `GET /api/board` after login and persist board mutations (column rename, card add, card edit, card delete, card drag-and-drop move) via `PUT /api/board` with optimistic UI updates and error handling
+- [x] Ensure loading and error states are clean and unobtrusive
 
 ### Tests & Success Criteria
 - **Frontend Unit Tests**: `vitest` tests mocking `/api/board` to verify initial fetch on mount and `PUT /api/board` calls when renaming a column, adding, editing, moving, and deleting a card

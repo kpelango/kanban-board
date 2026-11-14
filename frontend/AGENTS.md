@@ -28,6 +28,7 @@ The `frontend/` directory contains a Next.js 16 (App Router) React 19 TypeScript
   - `NewCardForm.tsx`: Collapsible inline form inside each column for adding a new card with `title` and `details`.
   - `KanbanBoard.test.tsx`: Vitest + React Testing Library component tests for rendering columns, renaming columns, and adding/removing cards.
 - `src/lib/`
+  - `api.ts`: Client helper functions (`fetchBoard`, `saveBoard`) for reading and persisting `BoardData` via `GET /api/board` and `PUT /api/board`.
   - `kanban.ts`: Core types (`Card`, `Column`, `BoardData`), `initialData` seed state with 5 fixed columns (`col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`) and 8 sample cards, `moveCard` pure state transition function for reordering/moving cards across columns, and `createId` helper.
   - `kanban.test.ts`: Unit tests for `moveCard` (reordering within a column, moving across columns, dropping onto a column container).
 - `src/test/`
