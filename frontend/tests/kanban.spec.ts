@@ -168,3 +168,44 @@ test("moves a card into an empty column and persists across reload", async ({
     page.getByTestId("column-col-discovery").getByTestId("card-card-1")
   ).toBeVisible();
 });
+
+test("opens AI chat sidebar, chats with assistant, and updates board automatically", async ({
+  page,
+}) => {
+  await loginAsUser(page);
+
+  const updatedBoard = JSON.parse(JSON.stringify(initialData)) as typeof initialData;
+  updatedBoard.cards["card-ai-1"] = {
+    id: "card-ai-1",
+    title: "AI Roadmap Milestone",
+    details: "Added automatically via structured output",
+  };
+  updatedBoard.columns[0].cardIds.push("card-ai-1");
+
+  await page.route("**/api/chat", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "I have added AI Roadmap Milestone to your Backlog.",
+        board: updatedBoard,
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "AI Assistant" }).click();
+  const sidebar = page.getByTestId("ai-chat-sidebar");
+  await expect(sidebar).toBeVisible();
+
+  await sidebar
+    .getByLabel("AI chat input")
+    .fill("Add AI Roadmap Milestone to Backlog");
+  await sidebar.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    sidebar.getByText("I have added AI Roadmap Milestone to your Backlog.")
+  ).toBeVisible();
+
+  const firstColumn = page.locator('[data-testid^="column-"]').first();
+  await expect(firstColumn.getByText("AI Roadmap Milestone")).toBeVisible();
+});

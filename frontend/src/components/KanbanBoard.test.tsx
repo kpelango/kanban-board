@@ -94,4 +94,69 @@ describe("KanbanBoard", () => {
       expect.objectContaining({ method: "PUT" })
     );
   });
+
+  it("opens AI chat sidebar, sends conversation history, and refreshes board on AI update", async () => {
+    const updatedBoard = JSON.parse(JSON.stringify(initialData)) as typeof initialData;
+    updatedBoard.cards["card-99"] = {
+      id: "card-99",
+      title: "AI Generated Task",
+      details: "Created from sidebar chat",
+    };
+    updatedBoard.columns[0].cardIds.push("card-99");
+
+    const fetchSpy = vi
+      .spyOn(global, "fetch")
+      .mockImplementation(async (input, init) => {
+        if (input === "/api/chat" && init?.method === "POST") {
+          const parsedBody = JSON.parse(init.body as string) as {
+            message: string;
+            history: Array<{ role: string; content: string }>;
+          };
+          if (parsedBody.history.length === 0) {
+            return new Response(
+              JSON.stringify({
+                reply: "You have 2 cards in Backlog.",
+                board: null,
+              }),
+              { status: 200 }
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              reply: "Added AI Generated Task to Backlog.",
+              board: updatedBoard,
+            }),
+            { status: 200 }
+          );
+        }
+        return new Response(JSON.stringify(initialData), { status: 200 });
+      });
+
+    render(<KanbanBoard />);
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith("/api/board");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /ai assistant/i }));
+    const sidebar = screen.getByTestId("ai-chat-sidebar");
+    expect(sidebar).toBeInTheDocument();
+
+    const chatInput = within(sidebar).getByLabelText("AI chat input");
+    await userEvent.type(chatInput, "How many cards in Backlog?");
+    await userEvent.click(within(sidebar).getByRole("button", { name: /^send$/i }));
+
+    expect(
+      await within(sidebar).findByText("You have 2 cards in Backlog.")
+    ).toBeInTheDocument();
+
+    await userEvent.type(chatInput, "Add AI Generated Task to Backlog");
+    await userEvent.click(within(sidebar).getByRole("button", { name: /^send$/i }));
+
+    expect(
+      await within(sidebar).findByText("Added AI Generated Task to Backlog.")
+    ).toBeInTheDocument();
+
+    const firstColumn = getFirstColumn();
+    expect(within(firstColumn).getByText("AI Generated Task")).toBeInTheDocument();
+  });
 });

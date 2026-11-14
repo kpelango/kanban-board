@@ -186,11 +186,11 @@ Extend the backend call so that it always calls the AI with the JSON of the Kanb
 Add a beautiful sidebar widget to the UI supporting full AI chat, and allowing the LLM (as it determines) to update the Kanban based on its Structured Outputs. If the AI updates the Kanban, then the UI should refresh automatically.
 
 ### Substeps
-- [ ] Create `ChatSidebar.tsx` styled with the project palette (`--navy-dark`, `--primary-blue`, `--secondary-purple`, `--accent-yellow`), featuring:
+- [x] Create `ChatSidebar.tsx` styled with the project palette (`--navy-dark`, `--primary-blue`, `--secondary-purple`, `--accent-yellow`), featuring:
   - Collapsible or docked right-hand sidebar layout alongside the Kanban board
   - Scrollable message history (user and assistant bubbles), loading indicator while awaiting the AI, and message input form
   - Conversation history held in browser React state for the MVP and sent with each `POST /api/chat` request
-- [ ] Integrate `ChatSidebar` into `KanbanBoard.tsx` so that whenever `POST /api/chat` returns an updated `board`, the Kanban board state updates immediately in the UI without requiring a page reload
+- [x] Integrate `ChatSidebar` into `KanbanBoard.tsx` so that whenever `POST /api/chat` returns an updated `board`, the Kanban board state updates immediately in the UI without requiring a page reload
 
 ### Tests & Success Criteria
 - **Frontend Unit Tests**: `vitest` tests verifying sidebar open/close, sending a message, displaying user and assistant messages, maintaining browser conversation history across turns, and automatically updating the rendered Kanban board when the API response includes an updated `board`
