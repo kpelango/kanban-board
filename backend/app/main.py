@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.ai import router as ai_router
+from app.ai import chat_router, router as ai_router
 from app.auth import router as auth_router
 from app.board import router as board_router
 from app.db import init_db
@@ -27,6 +27,7 @@ app = FastAPI(title="Kanban Studio API", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(board_router)
 app.include_router(ai_router)
+app.include_router(chat_router)
 
 
 @app.get("/api/health")

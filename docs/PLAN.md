@@ -161,11 +161,11 @@ Allow the backend to make an AI call via OpenRouter. Test connectivity with a si
 Extend the backend call so that it always calls the AI with the JSON of the Kanban board, plus the user's question (and conversation history). The AI should respond with Structured Outputs that includes the response to the user and optionally an update to the Kanban. Test thoroughly.
 
 ### Substeps
-- [ ] Define Pydantic schemas for the chat endpoint (`POST /api/chat`):
+- [x] Define Pydantic schemas for the chat endpoint (`POST /api/chat`):
   - Request: `message: str` and `history: list[ChatMessage]` (sent from browser state for the MVP)
   - Structured Output schema from the LLM: `assistant_message: str` and `updated_board: BoardData | None` (or `board_updated: bool` + `board: BoardData | None`)
-- [ ] Construct a clear system prompt instructing `openai/gpt-oss-120b` on how to inspect and manipulate the user's 5-column Kanban board (creating cards, editing card titles/details, moving/reordering cards across columns, deleting cards, renaming columns) while preserving existing IDs and valid column structure
-- [ ] Implement `POST /api/chat` in FastAPI:
+- [x] Construct a clear system prompt instructing `openai/gpt-oss-120b` on how to inspect and manipulate the user's 5-column Kanban board (creating cards, editing card titles/details, moving/reordering cards across columns, deleting cards, renaming columns) while preserving existing IDs and valid column structure
+- [x] Implement `POST /api/chat` in FastAPI:
   - Loads the current user's board from SQLite
   - Sends system prompt + current board JSON + conversation history + new user message to OpenRouter using Structured Outputs (`response_format`)
   - If the AI returns an `updated_board`, validates it and saves it to SQLite for the user

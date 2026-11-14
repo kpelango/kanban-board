@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 FIXED_COLUMN_IDS = (
@@ -53,6 +54,26 @@ class BoardData(BaseModel):
                 )
 
         return self
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    history: list[ChatMessage] = Field(default_factory=list)
+
+
+class AIChatStructuredOutput(BaseModel):
+    assistant_message: str = Field(min_length=1)
+    updated_board: BoardData | None = None
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    board: BoardData | None = None
 
 
 INITIAL_BOARD_DATA: dict = {
