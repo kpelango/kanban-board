@@ -1,274 +1,256 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   pointerWithin,
+  useSensor,
+  useSensors,
   type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { KanbanColumn } from "@/components/KanbanColumn";
-import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { ChatSidebar } from "@/components/ChatSidebar";
-import { fetchBoard, saveBoard } from "@/lib/api";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { CardFace } from "@/components/KanbanCard";
+import { CardDialog } from "@/components/CardDialog";
+import { CloseIcon } from "@/components/ui";
+import {
+  archiveCards,
+  createId,
+  deleteCard,
+  findColumnId,
+  insertCard,
+  isOverdue,
+  matchesFilters,
+  moveCard,
+  moveCardToColumn,
+  newCard,
+  todayISO,
+  type BoardData,
+  type Card,
+  type CardFilters,
+} from "@/lib/kanban";
 
 const collisionDetectionStrategy: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
-  if (pointerCollisions.length > 0) {
-    return pointerCollisions;
-  }
-  return closestCorners(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCorners(args);
 };
 
 type KanbanBoardProps = {
-  username?: string;
-  onLogout?: () => void;
+  board: BoardData;
+  filters: CardFilters;
+  onChange: (updater: (prev: BoardData) => BoardData) => void;
 };
 
-export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps = {}) => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
-  const [isLoaded, setIsLoaded] = useState(false);
+export const KanbanBoard = ({ board, filters, onChange }: KanbanBoardProps) => {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<{
+    card: Card;
+    columnId: string;
+    index: number;
+  } | null>(null);
 
   useEffect(() => {
-    let active = true;
-    fetchBoard()
-      .then((remoteBoard) => {
-        if (active) {
-          setBoard(remoteBoard);
-          setSyncError(null);
-        }
-      })
-      .catch(() => {
-        // Keep initialData fallback when offline or in isolated component tests
-      })
-      .finally(() => {
-        if (active) {
-          setIsLoaded(true);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const updateAndPersistBoard = (updater: (prev: BoardData) => BoardData) => {
-    setBoard((prev) => {
-      const next = updater(prev);
-      if (next !== prev) {
-        void saveBoard(next)
-          .then(() => setSyncError(null))
-          .catch(() => setSyncError("Failed to save changes to server."));
-      }
-      return next;
-    });
-  };
+    if (!lastDeleted) {
+      return;
+    }
+    const timer = setTimeout(() => setLastDeleted(null), 8000);
+    return () => clearTimeout(timer);
+  }, [lastDeleted]);
+  const today = todayISO();
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  const handleDragStart = (event: DragStartEvent) => setActiveCardId(String(event.active.id));
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveCardId(event.active.id as string);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
     setActiveCardId(null);
-
     if (!over || active.id === over.id) {
       return;
     }
-
-    updateAndPersistBoard((prev) => ({
+    onChange((prev) => ({
       ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
+      columns: moveCard(prev.columns, String(active.id), String(over.id)),
     }));
   };
 
-  const handleRenameColumn = (columnId: string, title: string) => {
-    updateAndPersistBoard((prev) => ({
+  const handleRenameColumn = (columnId: string, title: string) =>
+    onChange((prev) => ({
+      ...prev,
+      columns: prev.columns.map((column) => (column.id === columnId ? { ...column, title } : column)),
+    }));
+
+  const handleSetWipLimit = (columnId: string, wipLimit: number | null) =>
+    onChange((prev) => ({
       ...prev,
       columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
+        column.id === columnId ? { ...column, wipLimit } : column
       ),
     }));
+
+  const handleArchiveAll = (columnId: string) =>
+    onChange((prev) =>
+      archiveCards(prev, prev.columns.find((column) => column.id === columnId)?.cardIds ?? [])
+    );
+
+  const handleArchiveCard = (cardId: string) => {
+    onChange((prev) => archiveCards(prev, [cardId]));
+    setOpenCardId(null);
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
-    const id = createId("card");
-    updateAndPersistBoard((prev) => ({
+    const card = newCard(createId("card"), title, details);
+    onChange((prev) => insertCard(prev, card, columnId));
+  };
+
+  const handleSaveCard = (card: Card, columnId: string) => {
+    onChange((prev) => ({
       ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
+      cards: { ...prev.cards, [card.id]: card },
+      columns: moveCardToColumn(prev.columns, card.id, columnId),
     }));
+    setOpenCardId(null);
   };
 
-  const handleEditCard = (cardId: string, title: string, details: string) => {
-    updateAndPersistBoard((prev) => {
-      const existing = prev.cards[cardId];
-      if (!existing) {
-        return prev;
-      }
-      return {
-        ...prev,
-        cards: {
-          ...prev.cards,
-          [cardId]: { ...existing, title, details },
-        },
-      };
-    });
+  const handleDeleteCard = (cardId: string) => {
+    const columnId = findColumnId(board.columns, cardId);
+    if (columnId) {
+      setLastDeleted({
+        card: board.cards[cardId],
+        columnId,
+        index: board.columns.find((c) => c.id === columnId)!.cardIds.indexOf(cardId),
+      });
+    }
+    onChange((prev) => deleteCard(prev, cardId));
+    setOpenCardId(null);
   };
 
-  const handleDeleteCard = (columnId: string, cardId: string) => {
-    updateAndPersistBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
-    });
+  const handleUndoDelete = () => {
+    if (!lastDeleted) {
+      return;
+    }
+    const { card, columnId, index } = lastDeleted;
+    onChange((prev) => insertCard(prev, card, columnId, index));
+    setLastDeleted(null);
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
+  const openCard = openCardId ? board.cards[openCardId] : null;
 
   return (
-    <div
-      className="relative overflow-hidden"
-      data-testid={isLoaded ? "kanban-board-loaded" : "kanban-board-loading"}
-    >
-      <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
+    <>
+      <nav
+        aria-label="Columns"
+        className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-3 @6xl:hidden"
+      >
+        {board.columns.map((column, index) => (
+          <a
+            key={column.id}
+            href={`#lane-${column.id}`}
+            onClick={(event) => {
+              event.preventDefault();
+              document
+                .getElementById(`lane-${column.id}`)
+                ?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+            }}
+            className="flex shrink-0 items-baseline gap-1.5 rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-bold text-ink"
+          >
+            <span aria-hidden="true" className="font-numeral text-base leading-none text-navy">
+              {index + 1}
+            </span>
+            {column.title} <span className="text-muted">{column.cardIds.length}</span>
+          </a>
+        ))}
+      </nav>
 
-      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col gap-10 px-6 pb-16 pt-12">
-        <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-                Single Board Kanban
-              </p>
-              <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                Kanban Studio
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
-                Keep momentum visible. Rename columns, drag cards between stages,
-                and capture quick notes without getting buried in settings.
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                {username && (
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
-                    Signed in as {username}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIsChatOpen((prev) => !prev)}
-                  className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:brightness-110"
-                >
-                  AI Assistant
-                </button>
-                {onLogout && (
-                  <button
-                    type="button"
-                    onClick={onLogout}
-                    className="rounded-full border border-[var(--stroke)] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
-                  >
-                    Log out
-                  </button>
-                )}
-              </div>
-              <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                  Focus
-                </p>
-                <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                  One board. Five columns. Zero clutter.
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-4">
-            {board.columns.map((column) => (
-              <div
-                key={column.id}
-                className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)]"
-              >
-                <span className="h-2 w-2 rounded-full bg-[var(--accent-yellow)]" />
-                {column.title}
-              </div>
-            ))}
-          </div>
-          {syncError && (
-            <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700">
-              {syncError}
-            </p>
-          )}
-        </header>
-
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetectionStrategy}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetectionStrategy}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setActiveCardId(null)}
+      >
+        <section
+          aria-label="Board columns"
+          className="-mx-4 flex snap-x snap-mandatory items-stretch overflow-x-auto px-4 pb-6 @6xl:mx-0 @6xl:grid @6xl:grid-cols-5 @6xl:overflow-visible @6xl:px-0"
         >
-          <section className="grid gap-6 lg:grid-cols-5">
-            {board.columns.map((column) => (
+          {board.columns.map((column, index) => {
+            const cards = column.cardIds
+              .map((cardId) => board.cards[cardId])
+              .filter((card) => matchesFilters(card, filters, column.id, today));
+            return (
               <KanbanColumn
                 key={column.id}
                 column={column}
-                cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                stage={index + 1}
+                cards={cards}
+                totalCount={column.cardIds.length}
+                isOverdue={(card) => isOverdue(card, column.id, today)}
                 onRename={handleRenameColumn}
+                onSetWipLimit={handleSetWipLimit}
+                onArchiveAll={handleArchiveAll}
                 onAddCard={handleAddCard}
-                onEditCard={handleEditCard}
-                onDeleteCard={handleDeleteCard}
+                onOpenCard={setOpenCardId}
               />
-            ))}
-          </section>
-            <DragOverlay style={{ pointerEvents: "none" }}>
-              {activeCard ? (
-                <div className="pointer-events-none w-[260px]">
-                  <KanbanCardPreview card={activeCard} />
-                </div>
-              ) : null}
-            </DragOverlay>
-        </DndContext>
-      </main>
-      <ChatSidebar
-        isOpen={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-        onBoardUpdate={(updatedBoard) => setBoard(updatedBoard)}
-      />
-    </div>
+            );
+          })}
+        </section>
+        <DragOverlay>
+          {activeCard ? (
+            <div className="w-[280px] rotate-1 shadow-[var(--shadow-lift)]">
+              <CardFace card={activeCard} />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {openCard && (
+        <CardDialog
+          key={openCard.id}
+          card={openCard}
+          columnId={findColumnId(board.columns, openCard.id) ?? board.columns[0].id}
+          columns={board.columns}
+          onSave={handleSaveCard}
+          onDelete={() => handleDeleteCard(openCard.id)}
+          onArchive={() => handleArchiveCard(openCard.id)}
+          onClose={() => setOpenCardId(null)}
+        />
+      )}
+
+      {lastDeleted && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 z-50 flex w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-lg bg-navy px-4 py-3 text-[15px] text-white shadow-[var(--shadow-lift)]"
+        >
+          <span className="min-w-0 flex-1 truncate">Deleted &ldquo;{lastDeleted.card.title}&rdquo;</span>
+          <button
+            type="button"
+            onClick={handleUndoDelete}
+            className="rounded-md px-2 py-1 font-bold text-yellow hover:bg-white/10"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => setLastDeleted(null)}
+            aria-label="Dismiss"
+            className="rounded-md p-1 text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <CloseIcon size={16} />
+          </button>
+        </div>
+      )}
+    </>
   );
 };

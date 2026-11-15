@@ -179,3 +179,6 @@ frontend/playwright-report/
 frontend/test-results/
 
 
+
+.claude/*.local.md
+.playwright-mcp/

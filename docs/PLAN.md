@@ -210,3 +210,92 @@ Convert the chat history from browser-only memory to be stored in the SQLite dat
 ### Tests & Success Criteria
 - **Backend Unit Tests**: `pytest` tests verifying messages are persisted per user in `chat_messages`, loaded automatically in subsequent `POST /api/chat` turns, returned by `GET /api/chat/history`, and cleared by `DELETE /api/chat/history`
 - **Frontend & E2E Tests**: Vitest and Playwright tests verifying chat messages persist across a page reload and can be cleared by the user
+
+---
+
+# Phase 2: Multi-User, Multi-Board, Richer Kanban (Ralph loop)
+
+Goal: turn the MVP into a fuller project management tool while keeping the stack and the 5 fixed (renamable) columns. Each part ends with backend `pytest`, frontend `vitest`, lint, build, and Playwright E2E against a freshly rebuilt container.
+
+Decisions:
+- **Users**: self-service registration, change password, delete account. Passwords hashed with salted PBKDF2 (stdlib); legacy unsalted SHA-256 hashes are verified and upgraded on login. Seeded `user` and `e2e-test-user` remain.
+- **Boards**: many boards per user (`boards.name`, no `UNIQUE(user_id)`). New boards start from the sample template or empty. A user always keeps at least one board.
+- **Conversations**: many AI conversations per board (`conversations` table, `chat_messages.conversation_id`). The AI always works on the board the conversation belongs to. Conversation titles default to the first message.
+- **Migration**: existing databases are migrated in place on startup (boards table rebuilt without the unique constraint, legacy chat messages moved into a "Previous chat" conversation on the user's first board).
+- **Cards**: optional `priority` (`none|low|medium|high`), `dueDate` (`YYYY-MM-DD`), `labels` (list of strings). Columns: optional `wipLimit`. Old board JSON stays valid.
+
+## Part 12: Backend - users, boards, conversations, richer cards
+- [x] Salted password hashing with legacy upgrade; `POST /api/auth/register`, `PUT /api/auth/password`, `DELETE /api/auth/account`
+- [x] Schema migration and multi-board CRUD: `GET/POST /api/boards`, `GET/PUT/PATCH/DELETE /api/boards/{id}`
+- [x] Conversations: `GET/POST /api/boards/{id}/conversations`, `GET/PATCH/DELETE /api/conversations/{id}`, `POST /api/conversations/{id}/messages`
+- [x] Card `priority`/`dueDate`/`labels` and column `wipLimit` in schemas and AI prompt
+- [x] Tests: registration, password change, account deletion, migration from the Phase 1 schema, board CRUD and isolation, conversation CRUD and isolation, AI chat per conversation
+
+## Part 13: Frontend - accounts, board switcher, conversations
+- [x] Register / sign-in toggle; account panel (change password, delete account)
+- [x] Board switcher: list, create (template or blank), rename, delete
+- [x] Chat sidebar with conversation list: new, switch, rename, delete
+- [x] Tests: vitest component tests and Playwright E2E for each flow
+
+## Part 14: UI redesign and responsive layout
+- [x] Redesign with the project palette; mobile-first layout (horizontal snap-scrolling columns on small screens, full-screen chat on mobile, touch-friendly drag with touch sensor and a "Move to" control)
+- [x] Card detail editor for priority, due date, labels; card badges (priority, due/overdue, labels)
+- [x] Board toolbar: search, priority/label filters, stats (total, done, overdue), column WIP limits with over-limit warning
+- [x] Tests: unit tests for filter/stat helpers, component tests, Playwright E2E at desktop and mobile viewport
+
+## Part 15: Hardening and documentation
+- [x] Code review fixes: ignore stale board/chat responses after switching, flush pending board saves before AI messages, focus the first field in dialogs, case-insensitive usernames (with regression tests)
+- [x] Full regression, code review pass, docs (`AGENTS.md` files, `docs/DATABASE.md`, `CLAUDE.md`)
+
+## Part 16: Card checklists
+- [x] `checklist` on cards (`[{id, text, done}]`, max 50 items) in schemas, AI prompt, and TypeScript types
+- [x] Checklist editor in the card dialog (add, toggle, edit, remove) and a done/total progress badge on cards
+- [x] Tests: backend validation, unit tests for checklist progress, component and E2E tests
+
+## Part 17: Everyday board tools
+- [x] Due-date filter: overdue, due in the next 7 days, no due date
+- [x] Undo after deleting a card (toast restores it to the same column position)
+- [x] `/` keyboard shortcut focuses card search
+- [x] Tests: unit tests for the due filter, component tests for undo and the shortcut, E2E for due filter and undo
+
+## Part 18: Card archive
+- [x] `archived` map on BoardData (`{cardId: columnId}`): archived cards stay in `cards` but leave the columns; validated and explained to the AI
+- [x] Archive from the card dialog, "Archive all cards" in column settings, archived panel with restore (to the original column) and permanent delete
+- [x] Board stats and board card counts cover active cards only
+- [x] Tests: backend validation and counts, unit tests for archive helpers, component and E2E tests
+
+## Part 19: Admin user management
+- [x] `users.is_admin` (migrated in place; seeded `user` is an admin); `GET /api/auth/me` returns `isAdmin`
+- [x] Admin API: `GET /api/admin/users`, `PUT /api/admin/users/{id}/password`, `PATCH /api/admin/users/{id}` (admin flag), `DELETE /api/admin/users/{id}`; admins cannot demote or delete themselves
+- [x] "Manage users" dialog in the account menu for admins
+- [x] Tests: backend permissions and actions, component tests, E2E
+
+## Part 20: Session handling, AI feedback, accessibility checks
+- [x] Any 401 from the API (expired session, account deleted by an admin) returns the app to sign-in with a notice
+- [x] Assistant replies that changed the board are marked "Updated the board"
+- [x] Automated accessibility scans (axe-core) in E2E for sign-in, board, dialogs, chat, and mobile; fix violations
+- [x] Tests: unit tests for the session-expiry signal and chat marker, E2E for expiry and accessibility
+
+## Part 21: Security hardening
+- [x] Session secret from `SESSION_SECRET_KEY`, otherwise a random secret generated once and kept in `data/session_secret` (never a hard-coded default)
+- [x] Sessions are tied to the password: changing or resetting a password signs out other sessions (the current one is re-issued)
+- [x] Size limits: card title 200, details 5000, column title 40, at most 500 cards per board
+- [x] Tests: forged cookies rejected, secret persistence, session invalidation on password change/reset, limit validation
+
+## Part 22: Duplicate, export, and import boards
+- [x] `POST /api/boards` accepts optional `data` (validated BoardData) instead of a template
+- [x] Board menu: duplicate this board, export it as a JSON file, import a board from a JSON file
+- [x] Tests: backend create-with-data and validation, component tests, E2E for duplicate, export download, and import
+
+## Part 23: Code quality pass
+- [x] SQLite connections are closed after every use (context manager that commits, rolls back on error, and closes)
+- [x] Shared frontend helpers instead of copies: timestamp formatting, error messages, close icon
+- [x] Cross-platform start/stop scripts reviewed; root README with the essentials
+- [x] Full regression
+
+## Part 24: Final regression
+- [x] Fresh container build; backend, live OpenRouter, frontend unit, lint, type check, production build
+- [x] Live AI conversation through the running server (card with priority, due date, and checklist created in the requested column)
+- [x] E2E and accessibility suite run twice in a row (`--repeat-each=2`) with no failures and no server errors
+- [x] Fixed a registration race found by the repeat run: username uniqueness (ignoring case) is now enforced by a unique index, and a duplicate returns 409 instead of 500
+- [x] Playwright runs with one worker because tests share and reset the `e2e-test-user` account

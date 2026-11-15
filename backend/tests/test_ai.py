@@ -1,258 +1,314 @@
 import json
 import os
-from pathlib import Path
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ai import OPENROUTER_API_URL, OPENROUTER_MODEL, ask_openrouter, run_kanban_chat
-from app.db import get_board_for_user
+from app import db
+from app.ai import (
+    MAX_HISTORY_MESSAGES,
+    OPENROUTER_API_URL,
+    OPENROUTER_MODEL,
+    ask_openrouter,
+    parse_structured_ai_output,
+    run_kanban_chat,
+)
 from app.main import app
+from app.schemas import board_template
+from tests.conftest import first_board_id, login
 
 
-@pytest.fixture(autouse=True)
-def isolated_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    db_file = tmp_path / "test_pm.db"
-    monkeypatch.setenv("DATABASE_PATH", str(db_file))
-    return db_file
+class FakeOpenRouter:
+    """Replaces httpx.post, records each payload, and replies with queued AI outputs."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *replies: dict | str) -> None:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+        monkeypatch.setattr(httpx, "post", self)
+        self.replies = list(replies)
+        self.calls: list[dict] = []
+
+    def __call__(self, url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
+        self.calls.append({"url": url, "headers": headers, "json": json})
+        reply = self.replies.pop(0) if self.replies else {"assistant_message": "ok"}
+        content = reply if isinstance(reply, str) else json_dumps(reply)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}]},
+            request=httpx.Request("POST", url),
+        )
 
 
-def test_ai_endpoint_requires_authentication() -> None:
-    client = TestClient(app)
-    res = client.post("/api/ai/test", json={"prompt": "What is 2+2?"})
-    assert res.status_code == 401
+json_dumps = json.dumps
 
 
-def test_chat_endpoint_requires_authentication() -> None:
-    client = TestClient(app)
-    res = client.post("/api/chat", json={"message": "Hello", "history": []})
-    assert res.status_code == 401
+def new_conversation(client: TestClient, board_id: int | None = None) -> dict:
+    board_id = board_id or first_board_id(client)
+    res = client.post(f"/api/boards/{board_id}/conversations", json={})
+    assert res.status_code == 201
+    return res.json()
 
 
-def test_ai_missing_api_key_raises_500(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ai_endpoints_require_authentication(anon: TestClient) -> None:
+    assert anon.post("/api/ai/test", json={"prompt": "Hi"}).status_code == 401
+    assert anon.get("/api/boards/1/conversations").status_code == 401
+    assert anon.post("/api/boards/1/conversations", json={}).status_code == 401
+    assert anon.get("/api/conversations/1").status_code == 401
+    assert anon.patch("/api/conversations/1", json={"name": "x"}).status_code == 401
+    assert anon.delete("/api/conversations/1").status_code == 401
+    assert anon.post("/api/conversations/1/messages", json={"message": "Hi"}).status_code == 401
+
+
+def test_ai_missing_api_key_raises_500(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    client = TestClient(app)
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
     res = client.post("/api/ai/test", json={"prompt": "What is 2+2?"})
     assert res.status_code == 500
     assert "OPENROUTER_API_KEY" in res.json()["detail"]
 
 
 def test_ai_calls_openrouter_with_expected_model_and_headers(
-    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    captured: dict = {}
-
-    def fake_post(url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["json"] = json
-        captured["timeout"] = timeout
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": "4"}}]},
-            request=httpx.Request("POST", url),
-        )
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-
-    client = TestClient(app)
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
-    res = client.post(
-        "/api/ai/test",
-        json={"prompt": "What is 2+2? Reply with just the number."},
-    )
+    fake = FakeOpenRouter(monkeypatch, "4")
+    res = client.post("/api/ai/test", json={"prompt": "What is 2+2? Reply with just the number."})
 
     assert res.status_code == 200
     assert res.json() == {"reply": "4", "model": OPENROUTER_MODEL}
-    assert captured["url"] == OPENROUTER_API_URL
-    assert captured["headers"]["Authorization"] == "Bearer test-openrouter-key"
-    assert captured["json"]["model"] == "openai/gpt-oss-120b"
-    assert captured["json"]["messages"] == [
+    call = fake.calls[0]
+    assert call["url"] == OPENROUTER_API_URL
+    assert call["headers"]["Authorization"] == "Bearer test-openrouter-key"
+    assert call["json"]["model"] == "openai/gpt-oss-120b"
+    assert call["json"]["messages"] == [
         {"role": "user", "content": "What is 2+2? Reply with just the number."}
     ]
 
 
-def test_chat_without_board_update_includes_board_and_history(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    captured: dict = {}
-
-    def fake_post(url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
-        captured["json"] = json
-        ai_payload = {
-            "assistant_message": "You have 2 cards in Backlog.",
-            "updated_board": None,
-        }
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": json_lib_dumps(ai_payload)}}]},
-            request=httpx.Request("POST", url),
-        )
-
-    json_lib_dumps = json.dumps
-    monkeypatch.setattr(httpx, "post", fake_post)
-
-    client = TestClient(app)
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
-    res = client.post(
-        "/api/chat",
-        json={
-            "message": "How many cards are in Backlog?",
-            "history": [
-                {"role": "user", "content": "Hi"},
-                {"role": "assistant", "content": "Hello! How can I help?"},
-            ],
-        },
-    )
-
-    assert res.status_code == 200
-    assert res.json() == {
-        "reply": "You have 2 cards in Backlog.",
-        "board": None,
-    }
-    sent_messages = captured["json"]["messages"]
-    assert sent_messages[0]["role"] == "system"
-    assert "Align roadmap themes" in sent_messages[0]["content"]
-    assert sent_messages[1] == {"role": "user", "content": "Hi"}
-    assert sent_messages[2] == {
-        "role": "assistant",
-        "content": "Hello! How can I help?",
-    }
-    assert sent_messages[3] == {
-        "role": "user",
-        "content": "How many cards are in Backlog?",
-    }
-    assert captured["json"]["response_format"] == {"type": "json_object"}
-
-
-def test_chat_with_board_update_persists_new_board(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_openrouter_http_error_returns_502(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
 
-    initial_board = get_board_for_user("user").model_dump()
-    updated_board = json.loads(json.dumps(initial_board))
-    updated_board["cards"]["card-99"] = {
-        "id": "card-99",
-        "title": "AI Created Card",
-        "details": "Added by AI assistant",
-    }
-    updated_board["columns"][0]["cardIds"].append("card-99")
+    def failing_post(url: str, **_: object) -> httpx.Response:
+        return httpx.Response(429, json={}, request=httpx.Request("POST", url))
 
-    def fake_post(url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
-        ai_payload = {
-            "assistant_message": "I added 'AI Created Card' to your Backlog.",
-            "updated_board": updated_board,
-        }
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": json_lib_dumps(ai_payload)}}]},
-            request=httpx.Request("POST", url),
-        )
+    monkeypatch.setattr(httpx, "post", failing_post)
+    res = client.post("/api/ai/test", json={"prompt": "Hi"})
+    assert res.status_code == 502
+    assert res.json() == {"detail": "OpenRouter returned status 429"}
 
-    json_lib_dumps = json.dumps
-    monkeypatch.setattr(httpx, "post", fake_post)
 
-    client = TestClient(app)
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
-    res = client.post(
-        "/api/chat",
-        json={"message": "Add a card called AI Created Card to Backlog", "history": []},
+def test_parse_structured_output_handles_fences_and_rejects_invalid() -> None:
+    parsed = parse_structured_ai_output('```json\n{"assistant_message": "Hi"}\n```')
+    assert parsed.assistant_message == "Hi"
+    assert parsed.updated_board is None
+
+    with pytest.raises(Exception) as exc:
+        parse_structured_ai_output("not json")
+    assert getattr(exc.value, "status_code", None) == 502
+
+
+def test_conversation_crud(client: TestClient) -> None:
+    board_id = first_board_id(client)
+    assert client.get(f"/api/boards/{board_id}/conversations").json() == []
+
+    first = new_conversation(client, board_id)
+    assert first["title"] == "New conversation"
+    assert first["boardId"] == board_id
+    named = client.post(f"/api/boards/{board_id}/conversations", json={"title": "Sprint planning"})
+    assert named.json()["title"] == "Sprint planning"
+
+    listed = client.get(f"/api/boards/{board_id}/conversations").json()
+    assert {c["id"] for c in listed} == {first["id"], named.json()["id"]}
+
+    detail = client.get(f"/api/conversations/{first['id']}").json()
+    assert detail["messages"] == []
+
+    renamed = client.patch(f"/api/conversations/{first['id']}", json={"name": "Retro"})
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Retro"
+
+    assert client.delete(f"/api/conversations/{first['id']}").status_code == 204
+    assert client.get(f"/api/conversations/{first['id']}").status_code == 404
+    assert client.delete(f"/api/conversations/{first['id']}").status_code == 404
+    assert len(client.get(f"/api/boards/{board_id}/conversations").json()) == 1
+
+    assert client.get("/api/boards/9999/conversations").status_code == 404
+    assert client.post("/api/boards/9999/conversations", json={}).status_code == 404
+
+
+def test_conversations_are_isolated_between_users(client: TestClient) -> None:
+    conversation = new_conversation(client)
+    board_id = conversation["boardId"]
+
+    other = TestClient(app)
+    login(other, "e2e-test-user")
+    assert other.get(f"/api/boards/{board_id}/conversations").status_code == 404
+    assert other.post(f"/api/boards/{board_id}/conversations", json={}).status_code == 404
+    assert other.get(f"/api/conversations/{conversation['id']}").status_code == 404
+    assert other.patch(f"/api/conversations/{conversation['id']}", json={"name": "x"}).status_code == 404
+    assert other.delete(f"/api/conversations/{conversation['id']}").status_code == 404
+    assert other.post(
+        f"/api/conversations/{conversation['id']}/messages", json={"message": "Hi"}
+    ).status_code == 404
+
+
+def test_message_without_board_update_sends_board_and_history(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeOpenRouter(
+        monkeypatch,
+        {"assistant_message": "Hello! How can I help?", "updated_board": None},
+        {"assistant_message": "You have 2 cards in Backlog.", "updated_board": None},
     )
+    conversation = new_conversation(client)
+    url = f"/api/conversations/{conversation['id']}/messages"
 
+    first = client.post(url, json={"message": "Hi"})
+    assert first.status_code == 200
+    assert first.json()["conversation"]["title"] == "Hi"  # auto-titled from first message
+
+    res = client.post(url, json={"message": "How many cards are in Backlog?"})
     assert res.status_code == 200
     body = res.json()
-    assert body["reply"] == "I added 'AI Created Card' to your Backlog."
-    assert body["board"] is not None
-    assert "card-99" in body["board"]["cards"]
+    assert body["reply"] == "You have 2 cards in Backlog."
+    assert body["board"] is None
+    assert body["conversation"]["title"] == "Hi"  # not overwritten later
 
-    persisted_board = get_board_for_user("user")
-    assert "card-99" in persisted_board.cards
-    assert "card-99" in persisted_board.columns[0].cardIds
-
-
-def test_chat_history_persists_in_sqlite_and_can_be_cleared(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    captured_calls: list[dict] = []
-
-    def fake_post(url: str, *, headers: dict, json: dict, timeout: float) -> httpx.Response:
-        captured_calls.append(json)
-        turn = len(captured_calls)
-        ai_payload = {
-            "assistant_message": f"Assistant reply {turn}",
-            "updated_board": None,
-        }
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": json_lib_dumps(ai_payload)}}]},
-            request=httpx.Request("POST", url),
-        )
-
-    json_lib_dumps = json.dumps
-    monkeypatch.setattr(httpx, "post", fake_post)
-
-    client = TestClient(app)
-    client.post("/api/auth/login", json={"username": "user", "password": "password"})
-
-    # Initially empty
-    hist_res = client.get("/api/chat/history")
-    assert hist_res.status_code == 200
-    assert hist_res.json() == {"messages": []}
-
-    # Turn 1
-    res1 = client.post("/api/chat", json={"message": "First question", "history": []})
-    assert res1.status_code == 200
-
-    hist_after_1 = client.get("/api/chat/history").json()["messages"]
-    assert hist_after_1 == [
-        {"role": "user", "content": "First question"},
-        {"role": "assistant", "content": "Assistant reply 1"},
+    sent = fake.calls[1]["json"]["messages"]
+    assert sent[0]["role"] == "system"
+    assert "Align roadmap themes" in sent[0]["content"]
+    assert '"priority":"high"' in sent[0]["content"]
+    assert "'archived' maps archived card IDs" in sent[0]["content"]
+    assert sent[1:] == [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello! How can I help?"},
+        {"role": "user", "content": "How many cards are in Backlog?"},
     ]
+    assert fake.calls[1]["json"]["response_format"] == {"type": "json_object"}
 
-    # Turn 2 (even if client sends empty history, DB history is loaded automatically)
-    res2 = client.post("/api/chat", json={"message": "Second question", "history": []})
-    assert res2.status_code == 200
-    second_call_messages = captured_calls[1]["messages"]
-    assert second_call_messages[1] == {"role": "user", "content": "First question"}
-    assert second_call_messages[2] == {
-        "role": "assistant",
-        "content": "Assistant reply 1",
+    detail = client.get(f"/api/conversations/{conversation['id']}").json()
+    assert len(detail["messages"]) == 4
+
+
+def test_message_with_board_update_persists_to_conversation_board(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_id = first_board_id(client)
+    second = client.post("/api/boards", json={"name": "Second", "template": "blank"}).json()
+    updated = client.get(f"/api/boards/{second['id']}").json()
+    updated["cards"]["card-1"] = {
+        "id": "card-1",
+        "title": "AI Created Card",
+        "details": "Added by AI assistant",
+        "priority": "high",
+        "dueDate": "2026-12-24",
+        "labels": ["ai"],
     }
-    assert second_call_messages[3] == {"role": "user", "content": "Second question"}
+    updated["columns"][0]["cardIds"].append("card-1")
+    fake = FakeOpenRouter(
+        monkeypatch, {"assistant_message": "Added it.", "updated_board": updated}
+    )
 
-    # Clear history
-    del_res = client.delete("/api/chat/history")
-    assert del_res.status_code == 200
-    assert client.get("/api/chat/history").json() == {"messages": []}
+    conversation = new_conversation(client, second["id"])
+    res = client.post(
+        f"/api/conversations/{conversation['id']}/messages",
+        json={"message": "Add a card called AI Created Card"},
+    )
+    assert res.status_code == 200
+    assert res.json()["board"]["cards"]["card-1"]["title"] == "AI Created Card"
+    assert '"cards":{}' in fake.calls[0]["json"]["messages"][0]["content"]
+
+    persisted = client.get(f"/api/boards/{second['id']}").json()
+    assert persisted["cards"]["card-1"]["dueDate"] == "2026-12-24"
+    assert persisted["columns"][0]["cardIds"] == ["card-1"]
+    # Other boards are untouched
+    assert client.get(f"/api/boards/{first_id}").json()["cards"]["card-1"]["title"] == "Align roadmap themes"
+
+
+def test_invalid_ai_board_is_rejected_and_not_saved(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeOpenRouter(
+        monkeypatch,
+        {"assistant_message": "Done", "updated_board": {"columns": [], "cards": {}}},
+    )
+    board_id = first_board_id(client)
+    before = client.get(f"/api/boards/{board_id}").json()
+    conversation = new_conversation(client, board_id)
+    res = client.post(f"/api/conversations/{conversation['id']}/messages", json={"message": "Break it"})
+    assert res.status_code == 502
+    assert client.get(f"/api/boards/{board_id}").json() == before
+    assert client.get(f"/api/conversations/{conversation['id']}").json()["messages"] == []
+
+
+def test_conversations_keep_separate_histories(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeOpenRouter(monkeypatch)
+    a = new_conversation(client)
+    b = new_conversation(client)
+    client.post(f"/api/conversations/{a['id']}/messages", json={"message": "Only in A"})
+    client.post(f"/api/conversations/{b['id']}/messages", json={"message": "Only in B"})
+
+    assert fake.calls[1]["json"]["messages"][1:] == [{"role": "user", "content": "Only in B"}]
+    a_messages = client.get(f"/api/conversations/{a['id']}").json()["messages"]
+    assert [m["content"] for m in a_messages] == ["Only in A", "ok"]
+
+    listed = client.get(f"/api/boards/{a['boardId']}/conversations").json()
+    assert listed[0]["id"] == b["id"]  # most recently updated first
+
+
+def test_history_sent_to_ai_is_capped(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeOpenRouter(monkeypatch)
+    conversation = new_conversation(client)
+    db.append_messages(
+        conversation["id"],
+        [
+            db.ChatMessage(role="user" if i % 2 == 0 else "assistant", content=f"m{i}")
+            for i in range(30)
+        ],
+    )
+    client.post(f"/api/conversations/{conversation['id']}/messages", json={"message": "latest"})
+    sent = fake.calls[0]["json"]["messages"]
+    assert len(sent) == 1 + MAX_HISTORY_MESSAGES + 1
+    assert sent[1]["content"] == "m10"
+    assert sent[-1]["content"] == "latest"
+
+
+def test_send_message_validates_input(client: TestClient) -> None:
+    conversation = new_conversation(client)
+    url = f"/api/conversations/{conversation['id']}/messages"
+    assert client.post(url, json={"message": ""}).status_code == 422
+    assert client.post(url, json={"message": "x" * 4001}).status_code == 422
 
 
 @pytest.mark.live_ai
 def test_live_openrouter_two_plus_two() -> None:
     if not os.getenv("OPENROUTER_API_KEY"):
         pytest.skip("OPENROUTER_API_KEY not set in environment")
-    reply = ask_openrouter("What is 2+2? Reply with only the digits.")
-    assert "4" in reply
+    assert "4" in ask_openrouter("What is 2+2? Reply with only the digits.")
 
 
 @pytest.mark.live_ai
 def test_live_openrouter_structured_kanban_update() -> None:
     if not os.getenv("OPENROUTER_API_KEY"):
         pytest.skip("OPENROUTER_API_KEY not set in environment")
-    board = get_board_for_user("user")
     result = run_kanban_chat(
-        board=board,
-        message="Add a new card titled 'Launch beta' with details 'Invite 20 pilot users' to the Backlog column.",
+        board=board_template("sample"),
+        message="Add a new high priority card titled 'Launch beta' with details 'Invite 20 pilot users' and label 'release' to the Backlog column.",
         history=[],
     )
-    assert result.assistant_message
     assert result.updated_board is not None
-    backlog_cards = [
-        result.updated_board.cards[cid].title
-        for cid in result.updated_board.columns[0].cardIds
-    ]
-    assert "Launch beta" in backlog_cards
+    backlog = [result.updated_board.cards[cid] for cid in result.updated_board.columns[0].cardIds]
+    launch = next(card for card in backlog if card.title == "Launch beta")
+    assert launch.priority == "high"
+    assert "release" in launch.labels
+
+
+def test_get_messages_limit_returns_the_most_recent_in_order(client: TestClient) -> None:
+    conversation = client.post(f"/api/boards/{first_board_id(client)}/conversations", json={}).json()
+    db.append_messages(
+        conversation["id"],
+        [db.ChatMessage(role="user", content=f"m{i}") for i in range(5)],
+    )
+    recent = db.get_messages(conversation["id"], limit=2)
+    assert [m.content for m in recent] == ["m3", "m4"]
+    assert len(db.get_messages(conversation["id"])) == 5

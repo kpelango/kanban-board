@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
-
-const initialFormState = { title: "", details: "" };
+import { buttonPrimary, buttonSecondary, inputClass } from "@/components/ui";
 
 type NewCardFormProps = {
   onAdd: (title: string, details: string) => void;
@@ -8,68 +7,66 @@ type NewCardFormProps = {
 
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [formState, setFormState] = useState(initialFormState);
+  const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
+
+  const close = () => {
+    setIsOpen(false);
+    setTitle("");
+    setDetails("");
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!formState.title.trim()) {
+    if (!title.trim()) {
       return;
     }
-    onAdd(formState.title.trim(), formState.details.trim());
-    setFormState(initialFormState);
-    setIsOpen(false);
+    onAdd(title.trim(), details.trim());
+    close();
   };
 
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="mx-1.5 mt-1 flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-bold text-ink-soft transition hover:bg-white hover:text-link"
+      >
+        <span aria-hidden="true" className="text-lg leading-none">+</span>
+        Add a card
+      </button>
+    );
+  }
+
   return (
-    <div className="mt-4">
-      {isOpen ? (
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            value={formState.title}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, title: event.target.value }))
-            }
-            placeholder="Card title"
-            className="w-full rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
-            required
-          />
-          <textarea
-            value={formState.details}
-            onChange={(event) =>
-              setFormState((prev) => ({ ...prev, details: event.target.value }))
-            }
-            placeholder="Details"
-            rows={3}
-            className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110"
-            >
-              Add card
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                setFormState(initialFormState);
-              }}
-              className="rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          className="w-full rounded-full border border-dashed border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
-        >
-          Add a card
+    <form onSubmit={handleSubmit} className="mx-1.5 mt-1 space-y-2 rounded-md border border-stroke bg-white p-2.5">
+      <input
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        placeholder="Card title"
+        aria-label="Card title"
+        maxLength={200}
+        autoFocus
+        required
+        className={inputClass}
+      />
+      <textarea
+        value={details}
+        onChange={(event) => setDetails(event.target.value)}
+        placeholder="Details"
+        aria-label="Details"
+        maxLength={5000}
+        rows={2}
+        className={`resize-none ${inputClass}`}
+      />
+      <div className="flex gap-2">
+        <button type="submit" className={buttonPrimary}>
+          Add card
         </button>
-      )}
-    </div>
+        <button type="button" onClick={close} className={buttonSecondary}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 };

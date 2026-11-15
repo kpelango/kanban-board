@@ -1,59 +1,60 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KanbanBoard } from "@/components/KanbanBoard";
-import { LoginForm } from "@/components/LoginForm";
+import { AuthScreen } from "@/components/AuthScreen";
+import { Workspace } from "@/components/Workspace";
+import { SESSION_EXPIRED_EVENT, getMe, logout, type User } from "@/lib/api";
 
 export default function Home() {
-  const [username, setUsername] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true;
-    fetch("/api/auth/me")
-      .then(async (response) => {
-        if (!active) {
-          return;
-        }
-        if (response.ok) {
-          const data = (await response.json()) as { username: string };
-          setUsername(data.username);
-        } else {
-          setUsername(null);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setUsername(null);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsCheckingAuth(false);
-        }
-      });
+    getMe()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setIsCheckingAuth(false));
 
-    return () => {
-      active = false;
+    const handleExpired = () => {
+      setUser((current) => {
+        if (current) {
+          setNotice("Your session ended. Sign in again to continue.");
+        }
+        return null;
+      });
     };
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
   }, []);
 
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-    setUsername(null);
+    await logout().catch(() => null);
+    setUser(null);
   };
 
   if (isCheckingAuth) {
+    return <div className="min-h-dvh bg-navy" aria-busy="true" />;
+  }
+
+  if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
-        Loading workspace...
-      </div>
+      <AuthScreen
+        notice={notice}
+        onAuthenticated={(signedIn) => {
+          setNotice(null);
+          setUser(signedIn);
+        }}
+      />
     );
   }
 
-  if (!username) {
-    return <LoginForm onLoginSuccess={(loggedInUser) => setUsername(loggedInUser)} />;
-  }
-
-  return <KanbanBoard username={username} onLogout={handleLogout} />;
+  return (
+    <Workspace
+      key={user.username}
+      username={user.username}
+      isAdmin={user.isAdmin}
+      onLogout={handleLogout}
+    />
+  );
 }

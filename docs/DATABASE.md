@@ -2,110 +2,84 @@
 
 ## Overview
 
-The application uses a local SQLite database stored at `/app/data/pm.db` inside the Docker container (mounted to `./data/pm.db` on the host, configurable via the `DATABASE_PATH` environment variable for testing).
+SQLite database at `/app/data/pm.db` in the container (mounted from `./data/pm.db`; override with `DATABASE_PATH`). `backend/app/db.py` creates the schema on first use, migrates Phase 1 databases in place, and seeds the `user` and `e2e-test-user` accounts (password `password`), each with one sample board.
 
-If the database file or tables do not exist when the backend starts, the database module automatically creates the schema and seeds the default MVP user (`"user"`) and their initial 5-column Kanban board.
-
-## Relational Schema (SQLite)
+## Schema
 
 ```sql
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT NOT NULL,           -- pbkdf2_sha256$<iterations>$<salt hex>$<hash hex>
+    is_admin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
 );
 
-CREATE TABLE IF NOT EXISTS boards (
+CREATE UNIQUE INDEX idx_users_username_nocase ON users (username COLLATE NOCASE);
+
+CREATE TABLE boards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE,
-    board_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    board_json TEXT NOT NULL,              -- BoardData document, see below
+    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
+    updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
+);
+
+CREATE TABLE conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id INTEGER NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
+    updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
+);
+
+CREATE TABLE chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
 );
 ```
 
-### Design Rationale
+Ownership flows user -> boards -> conversations -> messages. Every query filters by the signed-in user's id (directly or through a join), so another user's ids return 404. Deleting a user or board cascades to everything below it. A user must keep at least one board.
 
-1. **Multi-User Support (`users`)**:
-   - Even though the MVP authenticates a single hardcoded user (`"user"` / `"password"`), storing users in a dedicated `users` table with a `UNIQUE` username allows adding more accounts later without schema changes.
-2. **One Kanban Board per User (`boards`)**:
-   - The `user_id INTEGER NOT NULL UNIQUE` constraint enforces the MVP rule of 1 Kanban board per user while isolating each user's board data via foreign key reference.
-3. **JSON Document Storage (`board_json`)**:
-   - The entire Kanban board state (`columns` order/titles and `cards` dictionary) is stored as a serialized JSON string in `boards.board_json`.
-   - Every board read (`GET /api/board`) and write (`PUT /api/board`) validates the JSON against Pydantic schemas before persisting or returning it.
-
-## `board_json` Structure
-
-The JSON stored in `boards.board_json` matches the frontend `BoardData` type:
+## `board_json` (BoardData)
 
 ```json
 {
   "columns": [
-    {
-      "id": "col-backlog",
-      "title": "Backlog",
-      "cardIds": ["card-1", "card-2"]
-    },
-    {
-      "id": "col-discovery",
-      "title": "Discovery",
-      "cardIds": ["card-3"]
-    },
-    {
-      "id": "col-progress",
-      "title": "In Progress",
-      "cardIds": ["card-4", "card-5"]
-    },
-    {
-      "id": "col-review",
-      "title": "Review",
-      "cardIds": ["card-6"]
-    },
-    {
-      "id": "col-done",
-      "title": "Done",
-      "cardIds": ["card-7", "card-8"]
-    }
+    { "id": "col-backlog", "title": "Backlog", "cardIds": ["card-1"], "wipLimit": null },
+    { "id": "col-discovery", "title": "Discovery", "cardIds": [] },
+    { "id": "col-progress", "title": "In Progress", "cardIds": [], "wipLimit": 3 },
+    { "id": "col-review", "title": "Review", "cardIds": [] },
+    { "id": "col-done", "title": "Done", "cardIds": [] }
   ],
   "cards": {
     "card-1": {
       "id": "card-1",
       "title": "Align roadmap themes",
-      "details": "Draft quarterly themes with impact statements and metrics."
+      "details": "Draft quarterly themes with impact statements and metrics.",
+      "priority": "high",
+      "dueDate": "2026-12-01",
+      "labels": ["strategy"],
+      "checklist": [{ "id": "item-1", "text": "Draft themes", "done": true }]
     }
-  }
+  },
+  "archived": { "card-9": "col-done" }
 }
 ```
 
-### Validation Rules (Enforced by Backend Pydantic Schema)
+Validation (Pydantic, `backend/app/schemas.py`):
+- Exactly the 5 fixed column ids, in order; titles non-empty; `wipLimit` is null or 1-99.
+- Every `cardIds` entry exists in `cards` with a matching `id`; no card in two columns.
+- `priority` is `none|low|medium|high` (default `none`); `dueDate` is a real `YYYY-MM-DD` date or null; `labels` has at most 10 entries of 1-30 characters; `checklist` has at most 50 items (`text` 1-200 characters, ids unique within the card). `archived` maps archived card ids to the column they are restored to; archived cards stay in `cards` but must not be in any column. Board card counts exclude archived cards. Missing optional fields get defaults, so Phase 1 documents stay valid.
 
-- `columns` must contain the 5 fixed columns (`col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`) with non-empty `title` strings.
-- Every ID listed in any column's `cardIds` must exist as a key in `cards` with a matching `card.id`.
-- No card ID may appear in more than one column at the same time.
+## Files next to the database
 
-## Initialization & Seeding Strategy
+`session_secret`: random key used to sign session cookies when `SESSION_SECRET_KEY` is not set. Deleting it signs everyone out.
 
-On FastAPI startup (or first database access):
-1. Ensure parent directory of `DATABASE_PATH` exists.
-2. Execute `CREATE TABLE IF NOT EXISTS` for `users` and `boards`.
-3. Insert default user `"user"` if not present.
-4. Insert default `boards` row for `"user"` populated with the seed `initialData` JSON if no board exists for that user.
+## Phase 1 migration
 
-## Persistent Chat History (`chat_messages`)
-
-Conversation history is persisted per user in the `chat_messages` table (created automatically alongside `users` and `boards` on startup):
-
-```sql
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
+On startup, a database with the old schema (`boards.user_id UNIQUE`, no `name`; `chat_messages.user_id`) is upgraded in place: boards are copied into the new table named "My Board", and each user's old chat messages move into a "Previous chat" conversation on their first board. `users.is_admin` is added if missing; when no admin exists, the `user` account becomes admin. Legacy unsalted SHA-256 password hashes are accepted once and replaced with PBKDF2 on the next successful sign-in.

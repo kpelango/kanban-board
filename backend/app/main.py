@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.ai import chat_router, router as ai_router
+from app.ai import board_conversations_router, conversations_router, router as ai_router
+from app.admin import router as admin_router
 from app.auth import router as auth_router
 from app.board import router as board_router
 from app.db import init_db
@@ -25,9 +26,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Kanban Studio API", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(board_router)
 app.include_router(ai_router)
-app.include_router(chat_router)
+app.include_router(board_conversations_router)
+app.include_router(conversations_router)
 
 
 @app.get("/api/health")

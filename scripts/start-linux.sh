@@ -26,7 +26,7 @@ docker run -d \
   --name "${CONTAINER_NAME}" \
   -p "${PORT}:8000" \
   -v "${PROJECT_ROOT}/data:/app/data" \
-  "${ENV_ARGS[@]}" \
+  ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \
   "${IMAGE_NAME}" >/dev/null
 
 echo "Server started at http://localhost:${PORT}"

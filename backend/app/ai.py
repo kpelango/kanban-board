@@ -1,33 +1,37 @@
 import json
 import os
 import re
+from datetime import date
 from typing import Any
+
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, ValidationError
 
-from app.auth import get_current_username
-from app.db import (
-    append_chat_messages_for_user,
-    clear_chat_history_for_user,
-    get_board_for_user,
-    get_chat_history_for_user,
-    save_board_for_user,
-)
+from app import db
+from app.auth import CurrentUser, get_current_user
+from app.board import not_found as board_not_found
 from app.schemas import (
     AIChatStructuredOutput,
     BoardData,
-    ChatHistoryResponse,
     ChatMessage,
-    ChatRequest,
-    ChatResponse,
+    Conversation,
+    ConversationSummary,
+    CreateConversationRequest,
+    RenameRequest,
+    SendMessageRequest,
+    SendMessageResponse,
 )
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "openai/gpt-oss-120b"
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
-chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
+board_conversations_router = APIRouter(
+    prefix="/api/boards/{board_id}/conversations", tags=["conversations"]
+)
+conversations_router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+MAX_HISTORY_MESSAGES = 20
 
 KANBAN_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_object",
@@ -111,27 +115,35 @@ def ask_openrouter(prompt: str) -> str:
 
 
 def build_kanban_system_prompt(board: BoardData) -> str:
-    board_json = json.dumps(board.model_dump(), indent=2)
+    board_json = board.model_dump_json()
     return (
         "You are an intelligent project management assistant for Kanban Studio.\n"
-        "You have full visibility into the user's current Kanban board JSON and can answer questions or modify the board when requested.\n\n"
+        "You have full visibility into the user's current Kanban board JSON and can answer questions or modify the board when requested.\n"
+        f"Today's date is {date.today().isoformat()}.\n\n"
         "Board rules:\n"
         "1. The board always has exactly 5 columns in this exact order and with these exact IDs: "
         "'col-backlog', 'col-discovery', 'col-progress', 'col-review', 'col-done'.\n"
-        "2. Columns can have their 'title' renamed, and their 'cardIds' array reordered or updated, "
+        "2. Columns can have their 'title' renamed, their 'wipLimit' (work-in-progress limit, integer 1-99 or null) set, and their 'cardIds' array reordered or updated, "
         "but columns cannot be added, deleted, or have their 'id' changed.\n"
         "3. Every ID in any column's 'cardIds' list must exist as a key in the 'cards' object with a matching 'id' property.\n"
         "4. No card ID may appear in more than one column.\n"
-        "5. When creating a new card, generate a unique ID like 'card-9', 'card-10', etc., add the Card object "
-        "({'id': '...', 'title': '...', 'details': '...'}) to 'cards', and append its ID to the target column's 'cardIds'.\n"
-        "6. When deleting a card, remove its ID from the column's 'cardIds' and remove its entry from 'cards'.\n\n"
+        "5. A card is {'id', 'title', 'details', 'priority', 'dueDate', 'labels', 'checklist'}: 'priority' is one of 'none', 'low', 'medium', 'high'; "
+        "'dueDate' is 'YYYY-MM-DD' or null; 'labels' is a list of short lowercase strings (max 10); "
+        "'checklist' is a list of subtasks {'id': 'item-1', 'text': '...', 'done': false} (max 50, ids unique within the card).\n"
+        "6. When creating a new card, generate a unique ID like 'card-9', 'card-10', etc. that is not already used, add the Card object "
+        "to 'cards', and append its ID to the target column's 'cardIds'.\n"
+        "7. When deleting a card, remove its ID from the column's 'cardIds' and remove its entry from 'cards'.\n"
+        "8. 'archived' maps archived card IDs to the column they came from. Archived cards stay in 'cards' but are in no column's 'cardIds'. "
+        "To archive a card, remove it from its column and add it to 'archived'; to restore one, remove it from 'archived' and append it to that column. "
+        "Ignore archived cards when describing the board unless the user asks about them.\n"
+        "9. Preserve every card and field you were not asked to change.\n\n"
         "You MUST respond strictly with a single valid JSON object (no markdown fences, no extra text) matching this exact schema:\n"
         "{\n"
         '  "assistant_message": "Your concise, helpful reply to the user",\n'
         '  "updated_board": null // OR the complete updated BoardData object {"columns": [...], "cards": {...}} if and only if the board should be modified\n'
         "}\n\n"
         "If the user is only asking a question or chatting without requesting a board change, set \"updated_board\" to null.\n"
-        "If the user asks to create, edit, move, reorder, or delete cards, or rename a column, return the full updated board in \"updated_board\".\n\n"
+        "If the user asks to create, edit, move, reorder, or delete cards, or change columns, return the full updated board in \"updated_board\".\n\n"
         f"Current Kanban Board JSON:\n{board_json}"
     )
 
@@ -173,51 +185,97 @@ def run_kanban_chat(
 @router.post("/test", response_model=AIPromptResponse)
 def test_ai_connectivity(
     payload: AIPromptRequest,
-    _: str = Depends(get_current_username),
+    _: CurrentUser = Depends(get_current_user),
 ) -> AIPromptResponse:
-    reply = ask_openrouter(payload.prompt)
-    return AIPromptResponse(reply=reply)
+    return AIPromptResponse(reply=ask_openrouter(payload.prompt))
 
 
-@chat_router.get("/history", response_model=ChatHistoryResponse)
-def read_chat_history(
-    username: str = Depends(get_current_username),
-) -> ChatHistoryResponse:
-    return ChatHistoryResponse(messages=get_chat_history_for_user(username))
+def conversation_not_found() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
 
-@chat_router.delete("/history")
-def delete_chat_history(
-    username: str = Depends(get_current_username),
-) -> dict[str, str]:
-    clear_chat_history_for_user(username)
-    return {"status": "cleared"}
+@board_conversations_router.get("", response_model=list[ConversationSummary])
+def list_conversations(
+    board_id: int, user: CurrentUser = Depends(get_current_user)
+) -> list[ConversationSummary]:
+    result = db.list_conversations(user.id, board_id)
+    if result is None:
+        raise board_not_found()
+    return result
 
 
-@chat_router.post("", response_model=ChatResponse)
-def chat_with_ai(
-    payload: ChatRequest,
-    username: str = Depends(get_current_username),
-) -> ChatResponse:
-    current_board = get_board_for_user(username)
-    stored_history = get_chat_history_for_user(username)
-    effective_history = stored_history if stored_history else payload.history
-    ai_output = run_kanban_chat(
-        board=current_board,
-        message=payload.message,
-        history=effective_history,
-    )
+@board_conversations_router.post(
+    "", response_model=ConversationSummary, status_code=status.HTTP_201_CREATED
+)
+def create_conversation(
+    board_id: int,
+    payload: CreateConversationRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> ConversationSummary:
+    result = db.create_conversation(user.id, board_id, payload.title)
+    if result is None:
+        raise board_not_found()
+    return result
+
+
+@conversations_router.get("/{conversation_id}", response_model=Conversation)
+def read_conversation(
+    conversation_id: int, user: CurrentUser = Depends(get_current_user)
+) -> Conversation:
+    summary = db.get_conversation(user.id, conversation_id)
+    if summary is None:
+        raise conversation_not_found()
+    return Conversation(**summary.model_dump(), messages=db.get_messages(conversation_id))
+
+
+@conversations_router.patch("/{conversation_id}", response_model=ConversationSummary)
+def rename_conversation(
+    conversation_id: int,
+    payload: RenameRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> ConversationSummary:
+    result = db.rename_conversation(user.id, conversation_id, payload.name)
+    if result is None:
+        raise conversation_not_found()
+    return result
+
+
+@conversations_router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: int, user: CurrentUser = Depends(get_current_user)
+) -> Response:
+    if not db.delete_conversation(user.id, conversation_id):
+        raise conversation_not_found()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@conversations_router.post("/{conversation_id}/messages", response_model=SendMessageResponse)
+def send_message(
+    conversation_id: int,
+    payload: SendMessageRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> SendMessageResponse:
+    conversation = db.get_conversation(user.id, conversation_id)
+    if conversation is None:
+        raise conversation_not_found()
+    board = db.get_board(user.id, conversation.boardId)
+    history = db.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES)
+    ai_output = run_kanban_chat(board=board, message=payload.message, history=history)
     if ai_output.updated_board is not None:
-        save_board_for_user(username, ai_output.updated_board)
-    append_chat_messages_for_user(
-        username,
+        db.save_board(user.id, conversation.boardId, ai_output.updated_board)
+    new_title = None
+    if not history and conversation.title == db.DEFAULT_CONVERSATION_TITLE:
+        new_title = payload.message.strip()[:60]
+    summary = db.append_messages(
+        conversation_id,
         [
             ChatMessage(role="user", content=payload.message),
             ChatMessage(role="assistant", content=ai_output.assistant_message),
         ],
+        title=new_title,
     )
-    return ChatResponse(
+    return SendMessageResponse(
         reply=ai_output.assistant_message,
         board=ai_output.updated_board,
+        conversation=summary,
     )
-

@@ -6,29 +6,96 @@
   --secondary-purple: #753991;
   --navy-dark: #032147;
   --gray-text: #888888;
-  --surface: #f7f8fb;
-  --surface-strong: #ffffff;
-  --stroke: rgba(3, 33, 71, 0.08);
-  --shadow: 0 18px 40px rgba(3, 33, 71, 0.12);
+  /* Darker text shades of the brand gray and blue: meet WCAG AA (4.5:1) on every surface */
+  --gray-text-strong: #666666;
+  --blue-text: #126b94;
+
+  --ink: #032147;
+  --ink-soft: #3b5170;
+  /* The board is a whiteboard: one cool surface, white cards, structure drawn in navy and yellow */
+  --surface: #f3f6f9;
+  --lane: #e5ecf3;
+  --stroke: #d6dee8;
+  --stroke-strong: #b4c3d6;
+  --danger: #c0392b;
+  --danger-soft: #fdecea;
+  --success: #1d7a4a;
+  /* Text shade of the brand yellow that is readable on light yellow tints */
+  --yellow-text: #7a5900;
+  /* Only lifted things (a dragged card, dialogs, popovers) cast a shadow */
+  --shadow-lift: 0 18px 36px -8px rgba(3, 33, 71, 0.28);
 }
 
 @theme inline {
   --color-background: var(--surface);
-  --color-foreground: var(--navy-dark);
-  --font-sans: var(--font-body);
+  --color-foreground: var(--ink);
+  --color-navy: var(--navy-dark);
+  --color-yellow: var(--accent-yellow);
+  --color-blue: var(--primary-blue);
+  --color-purple: var(--secondary-purple);
+  --color-muted: var(--gray-text-strong);
+  --color-link: var(--blue-text);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-surface: var(--surface);
+  --color-lane: var(--lane);
+  --color-stroke: var(--stroke);
+  --color-stroke-strong: var(--stroke-strong);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-yellow-text: var(--yellow-text);
+  --font-sans: var(--font-body), "Segoe UI", sans-serif;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   background: var(--surface);
-  color: var(--navy-dark);
+  color: var(--ink);
   font-family: var(--font-body), "Segoe UI", sans-serif;
   margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
 }
 
 .font-display {
   font-family: var(--font-display), "Segoe UI", sans-serif;
+}
+
+/* Condensed Bricolage for the stage numerals on the flow rail */
+.font-numeral {
+  font-family: var(--font-display), "Segoe UI", sans-serif;
+  font-stretch: 75%;
+  font-variation-settings: "wdth" 75;
+  font-feature-settings: "tnum";
+}
+
+/* Hide scrollbars on the mobile column strip while keeping it scrollable */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

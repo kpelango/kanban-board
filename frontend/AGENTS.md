@@ -2,56 +2,33 @@
 
 ## Overview
 
-The `frontend/` directory contains a Next.js 16 (App Router) React 19 TypeScript application that implements the Kanban Studio workspace. In its initial state, it is a pure client-side demo using local React state, configured to be built as a static export (`output: "export"`) and served by the FastAPI backend.
+Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4. Built as a static export (`output: "export"`) and served by FastAPI, so all data comes from relative `/api/*` calls. `npm run dev` has no backend; use the Docker container for end-to-end work.
 
-## Tech Stack
+## Structure
 
-- **Framework**: Next.js 16 (`next`), React 19 (`react`, `react-dom`), TypeScript 5
-- **Styling**: Tailwind CSS v4 (`@tailwindcss/postcss`, `tailwindcss`) with custom CSS variables in `src/app/globals.css` and `clsx` for conditional classes
-- **Drag and Drop**: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`
-- **Unit Testing**: Vitest (`vitest`), React Testing Library (`@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`), `jsdom`
-- **E2E Testing**: Playwright (`@playwright/test`)
-
-## Directory Structure
-
-- `src/app/`
-  - `layout.tsx`: Root HTML layout, loads `Space_Grotesk` (display) and `Manrope` (body) Google fonts and imports global styles.
-  - `page.tsx`: Entry route (`/`) rendering the `KanbanBoard` component.
-  - `globals.css`: Defines the color palette CSS variables (`--accent-yellow`, `--primary-blue`, `--secondary-purple`, `--navy-dark`, `--gray-text`, surfaces, and shadows) and base typography rules.
+- `src/app/page.tsx`: checks `/api/auth/me`, renders `AuthScreen` or `Workspace`.
+- `src/app/layout.tsx`, `globals.css`: fonts (Bricolage Grotesque display, Atkinson Hyperlegible body) and color tokens exposed as Tailwind colors (`navy`, `yellow`, `blue`, `purple`, `muted` and `link` (darker text shades of the brand gray and blue that pass WCAG AA; use them for text, keep `blue` for borders and focus), `ink`, `ink-soft`, `surface`, `lane`, `stroke`, `danger`), and `.font-numeral` (condensed Bricolage for stage numbers).
+- `src/lib/api.ts`: typed fetch helpers for every endpoint; errors throw `ApiError` with the server's `detail` (show them with `errorText(err, fallback)`); any 401 outside sign-in fires `SESSION_EXPIRED_EVENT`, which `page.tsx` turns into a return to sign-in with a notice.
+- `src/lib/format.ts`: server timestamp (UTC) and due-date formatting.
+- `src/lib/boardFile.ts`: export file format (`{kanbanStudio: 1, name, board}`), file names, and import parsing (bare BoardData also accepted).
+- `src/lib/kanban.ts`: types, `PRIORITY_LABELS`, `newCard`, and pure `BoardData -> BoardData` operations (`insertCard`, `deleteCard`, `moveCard`, `moveCardToColumn`, `archiveCards`, `restoreCard`, `deleteArchivedCard`) plus filters, `boardStats`, `isOverdue`, `parseLabels`, `todayISO`. Board handlers in components should call these rather than build board objects inline. The sample board used by tests is `src/test/fixtures.ts`.
 - `src/components/`
-  - `LoginForm.tsx`: Client sign-in form posting credentials to `POST /api/auth/login` and displaying validation errors.
-  - `LoginForm.test.tsx`: Vitest tests covering unauthenticated redirect, invalid credentials alert, sign-in transition, and logout.
-  - `ChatSidebar.tsx`: Docked right-hand AI assistant sidebar loading persisted conversation history from `GET /api/chat/history`, posting messages to `POST /api/chat`, clearing history via `DELETE /api/chat/history`, and triggering automatic board updates when Structured Outputs include an updated `BoardData`.
-  - `KanbanBoard.tsx`: Top-level stateful client component (`"use client"`). Manages `BoardData`, configures `@dnd-kit` pointer sensors and `DndContext`, handles drag start/end events, column renaming, card creation, card editing, card deletion, and `ChatSidebar` integration, and renders the board header (with user badge, AI Assistant toggle, and logout button), five `KanbanColumn` components, and `DragOverlay`.
-  - `KanbanColumn.tsx`: Droppable column container (`useDroppable`) with an editable column title input, card count badge, `SortableContext` list of `KanbanCard` items, empty drop state, and a `NewCardForm` at the bottom.
-  - `KanbanCard.tsx`: Draggable/sortable card item (`useSortable`) displaying card title, details, and action controls (edit and remove).
-  - `KanbanCardPreview.tsx`: Presentational card component rendered inside `DragOverlay` while dragging.
-  - `NewCardForm.tsx`: Collapsible inline form inside each column for adding a new card with `title` and `details`.
-  - `KanbanBoard.test.tsx`: Vitest + React Testing Library component tests for rendering columns, renaming columns, and adding/removing cards.
-- `src/lib/`
-  - `api.ts`: Client helper functions (`fetchBoard`, `saveBoard`, `sendChatMessage`, `fetchChatHistory`, `clearChatHistory`) for reading/persisting `BoardData` (`GET /api/board`, `PUT /api/board`) and interacting with the AI assistant (`POST /api/chat`, `GET /api/chat/history`, `DELETE /api/chat/history`).
-  - `kanban.ts`: Core types (`Card`, `Column`, `BoardData`), `initialData` seed state with 5 fixed columns (`col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`) and 8 sample cards, `moveCard` pure state transition function for reordering/moving cards across columns, and `createId` helper.
-  - `kanban.test.ts`: Unit tests for `moveCard` (reordering within a column, moving across columns, dropping onto a column container).
-- `src/test/`
-  - `setup.ts` & `vitest.d.ts`: Test environment setup importing `@testing-library/jest-dom`.
-- `tests/`
-  - `kanban.spec.ts`: Playwright E2E tests covering board load, adding a card, and mouse drag-and-drop between columns.
+  - `Workspace.tsx`: app shell. Owns the board list, active board, `BoardData`, filters, and chat/account state. `updateBoard` applies changes optimistically and queues `PUT` saves in order. Remembers the last board per user in `localStorage`.
+  - `BoardMenu.tsx` (switch, create, rename, delete, duplicate, export/import JSON boards), `BoardToolbar.tsx` (search with `/` shortcut, priority, label, and due-date filters, stats), `AccountDialog.tsx` (change password, delete account), `ArchiveDialog.tsx` (restore or permanently delete archived cards), `UsersDialog.tsx` (admins: reset passwords, grant or remove admin, delete users), `AuthScreen.tsx` (sign in and register).
+  - `KanbanBoard.tsx`: dnd-kit context (mouse, touch with press delay, keyboard sensors), mobile column tabs, card dialog, undo toast for deleted cards. `KanbanColumn.tsx` (inline title committed on blur/Enter, WIP limit dialog), `KanbanCard.tsx` (`CardFace` + sortable wrapper: pointer drag anywhere, keyboard drag via the grip handle so the card never nests interactive elements), `CardDialog.tsx` (title, details, priority, due date, labels, checklist via `ChecklistEditor.tsx`, column), `NewCardForm.tsx`.
+  - `ChatSidebar.tsx`: per-board conversation list, new chat (created on first send), rename, delete; applies `board` from AI replies via `onBoardUpdate`.
+  - `ui.tsx`: `Modal`, `useDismiss`, `CloseIcon`, shared button/input class strings, `ErrorText`.
+- `src/test/setup.ts`: jest-dom matchers plus a `Blob.text()` polyfill (missing in jsdom).
+- `src/test/fetchMock.ts`: `mockFetch({"METHOD /path": handler})` used by component tests.
 
-## Color Tokens
+## Layout
 
-Defined in `src/app/globals.css`:
-- `--accent-yellow`: `#ecad0a`
-- `--primary-blue`: `#209dd7`
-- `--secondary-purple`: `#753991`
-- `--navy-dark`: `#032147`
-- `--gray-text`: `#888888`
+Design: the board is a flat whiteboard. Each column is a numbered stage (1-5) sitting on one continuous yellow flow rail, which turns red under a column that is over its WIP limit; cards are flat white with a priority tab on the top edge, and only lifted things (dragged card, dialogs, popovers) cast shadows. The header is a slim navy bar. The sign-in screen reuses the rail motif.
+
+The board layout uses a container query on `<main>`: below 1152px of board width (`@6xl`, so also whenever the chat panel is open) the five lanes scroll horizontally with snap points and a numbered column tab strip; above it they form a 5-column grid. The chat is full screen on phones and a 420px right panel from `sm` up (the board gets right padding while it is open).
 
 ## Commands
 
-- `npm run dev`: Start Next.js development server
-- `npm run build`: Build production bundle / static export (`out/`)
-- `npm run lint`: Run ESLint
-- `npm run test:unit`: Run Vitest unit and component tests once
-- `npm run test:e2e`: Run Playwright end-to-end tests
-- `npm run test:all`: Run both unit and E2E test suites
-
+- `npm run lint`, `npm run build`
+- `npm run test:unit` (Vitest); `npx vitest run src/lib/kanban.test.ts -t "name"` for one test
+- `npm run test:e2e` (Playwright against `BASE_URL`, default the container at `http://127.0.0.1:8000`); E2E tests use the `e2e-test-user` account and reset it first; `tests/a11y.spec.ts` runs axe-core (WCAG 2.1 AA) on every main screen at desktop and mobile sizes
