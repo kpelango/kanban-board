@@ -1,8 +1,7 @@
-import hashlib
 import json
-import sqlite3
-from pathlib import Path
+from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import db
@@ -11,11 +10,9 @@ from app.schemas import INITIAL_BOARD_DATA
 from tests.conftest import first_board_id, login
 
 
-def test_db_auto_creation_and_default_seeding(isolated_db: Path) -> None:
-    assert not isolated_db.exists()
-    db.init_db()
-    assert isolated_db.exists()
-
+def test_dev_users_are_seeded_with_a_sample_board() -> None:
+    assert db.is_admin("user")
+    assert not db.is_admin("e2e-test-user")
     for username in ("user", "e2e-test-user"):
         user_id = db.get_user_id(username)
         boards = db.list_boards(user_id)
@@ -254,111 +251,36 @@ def test_boards_are_isolated_between_users(client: TestClient) -> None:
     assert other.get(f"/api/boards/{other_board_id}").json()["columns"][0]["title"] == "Backlog"
 
 
-def test_migrates_phase1_database(isolated_db: Path) -> None:
-    """A database created by the Phase 1 schema is upgraded in place on startup."""
-    legacy_board = json.loads(json.dumps(INITIAL_BOARD_DATA))
-    for card in legacy_board["cards"].values():
-        card.pop("priority", None)
-        card.pop("labels", None)
-    legacy_board["columns"][0]["title"] = "Legacy Backlog"
+def test_seeding_is_off_unless_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    with db.get_connection() as conn:
+        conn.execute("TRUNCATE users RESTART IDENTITY CASCADE")
+    monkeypatch.delenv("SEED_DEV_USERS")
+    db.seed_dev_users()
+    assert db.get_user("user") is None
 
-    conn = sqlite3.connect(isolated_db)
-    conn.executescript(
-        """
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
-        );
-        CREATE TABLE boards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL UNIQUE,
-            board_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
-        CREATE TABLE chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-            content TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO users (username, password_hash) VALUES ('user', ?)",
-        (hashlib.sha256(b"password").hexdigest(),),
-    )
-    conn.execute(
-        "INSERT INTO boards (user_id, board_json) VALUES (1, ?)", (json.dumps(legacy_board),)
-    )
-    conn.executemany(
-        "INSERT INTO chat_messages (user_id, role, content) VALUES (1, ?, ?)",
-        [("user", "Old question"), ("assistant", "Old answer")],
-    )
-    conn.commit()
-    conn.close()
-
-    client = TestClient(app)
-    login(client)  # legacy SHA-256 hash still works
-
-    with db.get_connection() as check:
-        stored_hash = check.execute(
-            "SELECT password_hash FROM users WHERE username = 'user'"
-        ).fetchone()[0]
-    assert stored_hash.startswith("pbkdf2_sha256$")  # upgraded on login
-    login(TestClient(app))
-
-    boards = client.get("/api/boards").json()
-    assert len(boards) == 1
-    assert boards[0]["name"] == "My Board"
-    board = client.get(f"/api/boards/{boards[0]['id']}").json()
-    assert board["columns"][0]["title"] == "Legacy Backlog"
-    assert board["cards"]["card-1"]["priority"] == "none"
-
-    # The unique constraint is gone: a second board can be created
-    assert client.post("/api/boards", json={"name": "Second"}).status_code == 201
-
-    conversations = client.get(f"/api/boards/{boards[0]['id']}/conversations").json()
-    assert [c["title"] for c in conversations] == ["Previous chat"]
-    messages = client.get(f"/api/conversations/{conversations[0]['id']}").json()["messages"]
-    assert messages == [
-        {"role": "user", "content": "Old question"},
-        {"role": "assistant", "content": "Old answer"},
-    ]
-
-    # e2e-test-user is seeded into the migrated database; the Phase 1 'user' becomes admin
-    login(TestClient(app), "e2e-test-user")
+    monkeypatch.setenv("SEED_DEV_USERS", "1")
+    db.seed_dev_users()
+    db.seed_dev_users()  # running twice is harmless
     assert db.is_admin("user")
-    assert not db.is_admin("e2e-test-user")
+    assert len(db.list_boards(db.get_user_id("user"))) == 1
 
 
-def test_connections_are_closed_after_each_use(client: TestClient, monkeypatch) -> None:
-    opened: list[sqlite3.Connection] = []
-    real_connect = sqlite3.connect
-
-    def tracking_connect(*args, **kwargs):
-        conn = real_connect(*args, **kwargs)
-        opened.append(conn)
-        return conn
-
-    monkeypatch.setattr(db.sqlite3, "connect", tracking_connect)
+def test_connections_are_returned_to_the_pool(client: TestClient) -> None:
     board_id = first_board_id(client)
     client.put(f"/api/boards/{board_id}", json=client.get(f"/api/boards/{board_id}").json())
-    assert opened
-    for conn in opened:
-        try:
-            conn.execute("SELECT 1")
-        except sqlite3.ProgrammingError:
-            continue
-        raise AssertionError("connection left open")
+    stats = db.get_pool().get_stats()
+    assert stats["pool_size"] == stats["pool_available"]
+
+
+def test_timestamps_are_iso_with_timezone(client: TestClient) -> None:
+    board = client.get("/api/boards").json()[0]
+    assert datetime.fromisoformat(board["updatedAt"]).tzinfo is not None
+    board_id = board["id"]
+    convo = client.post(f"/api/boards/{board_id}/conversations", json={}).json()
+    assert datetime.fromisoformat(convo["updatedAt"]).tzinfo is not None
 
 
 def test_failed_writes_roll_back() -> None:
-    db.init_db()
     try:
         with db.get_connection() as conn:
             conn.execute("UPDATE boards SET name = 'Half done'")

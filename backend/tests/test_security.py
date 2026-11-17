@@ -1,6 +1,4 @@
 import json
-import stat
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,12 +8,6 @@ from app import auth, db
 from app.main import app
 from app.schemas import MAX_CARDS
 from tests.conftest import first_board_id, login
-
-
-@pytest.fixture(autouse=True)
-def no_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
-    auth._secret_from_file.cache_clear()
 
 
 def forged_cookie(secret: str, username: str = "user", pw: str = "") -> str:
@@ -33,26 +25,17 @@ def test_cookie_signed_with_old_default_secret_is_rejected(anon: TestClient) -> 
     assert anon.get("/api/auth/me").status_code == 401
 
 
-def test_generated_secret_is_private_and_survives_restarts(isolated_db: Path) -> None:
-    client = TestClient(app)
-    login(client)
-    secret_file = isolated_db.parent / "session_secret"
-    assert secret_file.exists()
-    assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
-    assert len(secret_file.read_text()) >= 40
-
-    auth._secret_from_file.cache_clear()  # simulate a server restart
-    assert client.get("/api/auth/me").status_code == 200
+def test_session_secret_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SESSION_SECRET_KEY")
+    with pytest.raises(RuntimeError, match="SESSION_SECRET_KEY"):
+        auth.get_serializer()
+    with pytest.raises(RuntimeError, match="SESSION_SECRET_KEY"):
+        with TestClient(app):  # startup fails fast
+            pass
 
 
-def test_secret_env_var_takes_precedence(
-    isolated_db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_secret_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SESSION_SECRET_KEY", "from-the-environment")
-    client = TestClient(app)
-    login(client)
-    assert not (isolated_db.parent / "session_secret").exists()
-
     password_hash = db.get_user("user").password_hash  # type: ignore[union-attr]
     other = TestClient(app)
     other.cookies.set(

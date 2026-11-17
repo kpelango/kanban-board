@@ -2,8 +2,9 @@ import { errorText } from "@/lib/api";
 import { formatDueDate, parseServerTime } from "@/lib/format";
 
 describe("format helpers", () => {
-  it("reads SQLite timestamps as UTC", () => {
-    expect(parseServerTime("2026-11-14 10:30:00").toISOString()).toBe("2026-11-14T10:30:00.000Z");
+  it("reads ISO server timestamps with their offset", () => {
+    expect(parseServerTime("2026-11-14T10:30:00.123456+00:00").toISOString()).toBe("2026-11-14T10:30:00.123Z");
+    expect(parseServerTime("2026-11-14T12:30:00+02:00").toISOString()).toBe("2026-11-14T10:30:00.000Z");
   });
 
   it("formats due dates as local calendar dates", () => {

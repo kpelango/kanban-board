@@ -1,9 +1,6 @@
 import hashlib
 import os
-import secrets
 from dataclasses import dataclass
-from functools import cache
-from pathlib import Path
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -21,24 +18,12 @@ SESSION_COOKIE_NAME = "pm_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 
 
-@cache
-def _secret_from_file(path: Path) -> str:
-    """Reads the generated session secret, creating it (owner-only) on first use."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return path.read_text().strip()
-    with os.fdopen(fd, "w") as handle:
-        secret = secrets.token_urlsafe(32)
-        handle.write(secret)
-    return secret
-
-
 def get_serializer() -> URLSafeTimedSerializer:
-    secret = os.getenv("SESSION_SECRET_KEY") or _secret_from_file(
-        db.get_db_path().parent / "session_secret"
-    )
+    """Signs session cookies. The secret must come from the environment so every server
+    instance (and every serverless function) shares it."""
+    secret = os.getenv("SESSION_SECRET_KEY")
+    if not secret:
+        raise RuntimeError("SESSION_SECRET_KEY is not set")
     return URLSafeTimedSerializer(secret, salt="pm-auth-session")
 
 

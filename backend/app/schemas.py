@@ -1,5 +1,5 @@
 import copy
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
@@ -129,7 +129,7 @@ class UserSummary(BaseModel):
     id: int
     username: str
     isAdmin: bool
-    createdAt: str
+    createdAt: datetime
     boardCount: int
 
 
@@ -148,7 +148,7 @@ class BoardSummary(BaseModel):
     id: int
     name: str
     cardCount: int
-    updatedAt: str
+    updatedAt: datetime
 
 
 class CreateBoardRequest(BaseModel):
@@ -174,7 +174,7 @@ class ConversationSummary(BaseModel):
     id: int
     boardId: int
     title: str
-    updatedAt: str
+    updatedAt: datetime
 
 
 class Conversation(ConversationSummary):

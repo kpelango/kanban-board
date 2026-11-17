@@ -97,11 +97,13 @@ def test_duplicate_usernames_are_rejected_by_the_database() -> None:
     assert db.create_user("hank", "password1") is None
     assert db.create_user("HANK", "password1") is None
     with db.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM users WHERE username = 'hank' COLLATE NOCASE").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE lower(username) = 'hank'"
+        ).fetchone()["n"] == 1
         # A failed sign-up leaves no orphaned board behind
         assert conn.execute(
-            "SELECT COUNT(*) FROM boards WHERE user_id NOT IN (SELECT id FROM users)"
-        ).fetchone()[0] == 0
+            "SELECT COUNT(*) AS n FROM boards WHERE user_id NOT IN (SELECT id FROM users)"
+        ).fetchone()["n"] == 0
 
 
 def test_concurrent_registrations_never_error(anon: TestClient) -> None:
@@ -167,10 +169,12 @@ def test_delete_account_removes_user_data_and_invalidates_session(anon: TestClie
     assert db.get_user_id("dave") is None
 
     with db.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM boards WHERE id = ?", (board_id,)).fetchone()[0] == 0
         assert conn.execute(
-            "SELECT COUNT(*) FROM conversations WHERE board_id = ?", (board_id,)
-        ).fetchone()[0] == 0
+            "SELECT COUNT(*) AS n FROM boards WHERE id = %s", (board_id,)
+        ).fetchone()["n"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM conversations WHERE board_id = %s", (board_id,)
+        ).fetchone()["n"] == 0
 
     # A session cookie for a deleted user must stop working
     stale = TestClient(app)

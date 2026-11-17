@@ -1,13 +1,16 @@
 import hashlib
 import hmac
-import json
 import os
 import secrets
-import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from app.schemas import (
     BoardData,
@@ -18,56 +21,11 @@ from app.schemas import (
     board_template,
 )
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "pm.db"
 PBKDF2_ITERATIONS = 100_000
 DEFAULT_CONVERSATION_TITLE = "New conversation"
 SEED_USERS = ("user", "e2e-test-user")
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    is_admin INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP )
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users (username COLLATE NOCASE);
-CREATE TABLE IF NOT EXISTS boards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    board_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_boards_user ON boards (user_id);
-CREATE TABLE IF NOT EXISTS conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    board_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    FOREIGN KEY (board_id) REFERENCES boards (id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_conversations_board ON conversations (board_id);
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id INTEGER NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_messages_conversation ON chat_messages (conversation_id);
-"""
-
-_initialized_paths: set[Path] = set()
-
-
-def get_db_path() -> Path:
-    custom_path = os.getenv("DATABASE_PATH")
-    return Path(custom_path) if custom_path else DEFAULT_DB_PATH
+Row = dict[str, Any]
 
 
 # Passwords
@@ -82,10 +40,6 @@ def hash_password(password: str) -> str:
 
 
 def check_password(password: str, stored: str) -> bool:
-    if "$" not in stored:
-        # Legacy unsalted SHA-256 hash from Phase 1
-        legacy = hashlib.sha256(password.encode("utf-8")).hexdigest()
-        return hmac.compare_digest(legacy, stored)
     _, iterations, salt, expected = stored.split("$")
     digest = hashlib.pbkdf2_hmac(
         "sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations)
@@ -93,159 +47,97 @@ def check_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(digest.hex(), expected)
 
 
-# Connection, schema, migration
+# Connection pool. The schema comes from supabase/migrations; this module never creates it.
+
+_pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-
-
-def _migrate_phase1(conn: sqlite3.Connection) -> None:
-    """Upgrade the Phase 1 schema (one board per user, chat per user) in place."""
-    user_cols = _table_columns(conn, "users")
-    if user_cols and "is_admin" not in user_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
-
-    board_cols = _table_columns(conn, "boards")
-    if board_cols and "name" not in board_cols:
-        conn.executescript(
-            """
-            CREATE TABLE boards_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                board_json TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-                updated_at TEXT NOT NULL DEFAULT ( CURRENT_TIMESTAMP ),
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-            );
-            INSERT INTO boards_new (id, user_id, name, board_json, updated_at)
-                SELECT id, user_id, 'My Board', board_json, updated_at FROM boards;
-            DROP TABLE boards;
-            ALTER TABLE boards_new RENAME TO boards;
-            """
-        )
-
-    message_cols = _table_columns(conn, "chat_messages")
-    if message_cols and "conversation_id" not in message_cols:
-        conn.execute("ALTER TABLE chat_messages RENAME TO chat_messages_legacy")
-        conn.executescript(SCHEMA)
-        user_ids = [
-            row["user_id"]
-            for row in conn.execute(
-                "SELECT DISTINCT user_id FROM chat_messages_legacy"
+def get_pool() -> ConnectionPool:
+    """Creates the pool on first use (tests and serverless functions never run startup hooks)."""
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            url = os.getenv("DATABASE_URL")
+            if not url:
+                raise RuntimeError("DATABASE_URL is not set")
+            _pool = ConnectionPool(
+                url,
+                min_size=1,
+                max_size=int(os.getenv("DB_POOL_MAX", "10")),
+                # The Supabase transaction pooler cannot keep prepared statements
+                kwargs={"row_factory": dict_row, "prepare_threshold": None},
+                check=ConnectionPool.check_connection,
+                open=True,
             )
-        ]
-        for user_id in user_ids:
-            board = conn.execute(
-                "SELECT id FROM boards WHERE user_id = ? ORDER BY id LIMIT 1",
-                (user_id,),
-            ).fetchone()
-            if board is None:
-                continue
-            conversation_id = conn.execute(
-                "INSERT INTO conversations (board_id, title) VALUES (?, 'Previous chat')",
-                (board["id"],),
-            ).lastrowid
-            conn.execute(
-                """
-                INSERT INTO chat_messages (conversation_id, role, content, created_at)
-                SELECT ?, role, content, created_at FROM chat_messages_legacy
-                WHERE user_id = ? ORDER BY id
-                """,
-                (conversation_id, user_id),
-            )
-        conn.execute("DROP TABLE chat_messages_legacy")
+        return _pool
 
 
-def _create_user(conn: sqlite3.Connection, username: str, password: str) -> int:
-    user_id = int(
-        conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, hash_password(password)),
-        ).lastrowid
-    )
-    _create_board(conn, user_id, "My First Board", "sample")
-    return user_id
+def close_pool() -> None:
+    global _pool
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+
+
+@contextmanager
+def get_connection() -> Iterator[psycopg.Connection[Row]]:
+    """Borrows a pooled connection; commits on success, rolls back on error, returns it."""
+    with get_pool().connection() as conn:
+        yield conn
+
+
+def _create_user(
+    conn: psycopg.Connection[Row], username: str, password_hash: str, is_admin: bool = False
+) -> int:
+    row = conn.execute(
+        "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s) RETURNING id",
+        (username, password_hash, is_admin),
+    ).fetchone()
+    assert row is not None
+    _create_board(conn, row["id"], "My First Board", "sample")
+    return int(row["id"])
 
 
 def _create_board(
-    conn: sqlite3.Connection,
+    conn: psycopg.Connection[Row],
     user_id: int,
     name: str,
     template: str,
     board: BoardData | None = None,
 ) -> int:
     data = (board or board_template(template)).model_dump(mode="json")
-    return int(
-        conn.execute(
-            "INSERT INTO boards (user_id, name, board_json) VALUES (?, ?, ?)",
-            (user_id, name, json.dumps(data)),
-        ).lastrowid
-    )
+    row = conn.execute(
+        "INSERT INTO boards (user_id, name, board_json) VALUES (%s, %s, %s) RETURNING id",
+        (user_id, name, Jsonb(data)),
+    ).fetchone()
+    assert row is not None
+    return int(row["id"])
 
 
-def init_db(db_path: Path | None = None) -> None:
-    path = db_path or get_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        _migrate_phase1(conn)
-        conn.executescript(SCHEMA)
-        for username in SEED_USERS:
-            exists = conn.execute(
-                "SELECT 1 FROM users WHERE username = ?", (username,)
-            ).fetchone()
-            if not exists:
-                _create_user(conn, username, "password")
-        # The seeded account administers a fresh install until someone else is made admin
-        conn.execute(
-            """
-            UPDATE users SET is_admin = 1 WHERE username = 'user'
-            AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
-            """
-        )
-        # Users from Phase 1 always have a board; guarantee it for anyone else too
-        for row in conn.execute(
-            "SELECT id FROM users WHERE id NOT IN (SELECT user_id FROM boards)"
-        ).fetchall():
-            _create_board(conn, row["id"], "My First Board", "sample")
-        conn.commit()
-    finally:
-        conn.close()
-    _initialized_paths.add(path)
-
-
-@contextmanager
-def get_connection() -> Iterator[sqlite3.Connection]:
-    """Opens a connection, commits on success, rolls back on error, and always closes it."""
-    path = get_db_path()
-    if path not in _initialized_paths or not path.exists():
-        init_db(path)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        with conn:
-            yield conn
-    finally:
-        conn.close()
+def seed_dev_users() -> None:
+    """Creates `user` (admin) and `e2e-test-user`, password `password`. Local dev and tests only."""
+    if os.getenv("SEED_DEV_USERS") != "1":
+        return
+    for username in SEED_USERS:
+        create_user(username, "password", is_admin=username == "user")
 
 
 # Users
 
 
-def create_user(username: str, password: str) -> int | None:
+def create_user(username: str, password: str, is_admin: bool = False) -> int | None:
     """Creates a user, or returns None if the name is taken ignoring case ("User" vs "user").
 
     Uniqueness is enforced by the database index, so concurrent sign-ups cannot both win.
+    The whole transaction (user and starter board) rolls back on a duplicate.
     """
+    password_hash = hash_password(password)  # hashed before borrowing a connection
     try:
         with get_connection() as conn:
-            return _create_user(conn, username, password)
-    except sqlite3.IntegrityError:
+            return _create_user(conn, username, password_hash, is_admin)
+    except psycopg.errors.UniqueViolation:
         return None
 
 
@@ -253,22 +145,18 @@ def authenticate(username: str, password: str) -> str | None:
     """Returns the stored username (its original spelling) when the credentials match."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ? COLLATE NOCASE",
+            "SELECT username, password_hash FROM users WHERE lower(username) = lower(%s)",
             (username,),
         ).fetchone()
-        if row is None or not check_password(password, row["password_hash"]):
-            return None
-        if "$" not in row["password_hash"]:
-            conn.execute(
-                "UPDATE users SET password_hash = ? WHERE id = ?",
-                (hash_password(password), row["id"]),
-            )
-        return str(row["username"])
+    if row is None or not check_password(password, row["password_hash"]):
+        return None
+    return str(row["username"])
 
 
 class UserRecord(NamedTuple):
     id: int
     is_admin: bool
+    is_guest: bool
     password_hash: str
 
 
@@ -276,11 +164,12 @@ def get_user(username: str) -> UserRecord | None:
     """Looks up a user by exact username."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, is_admin, password_hash FROM users WHERE username = ?", (username,)
+            "SELECT id, is_admin, is_guest, password_hash FROM users WHERE username = %s",
+            (username,),
         ).fetchone()
-        if row is None:
-            return None
-        return UserRecord(int(row["id"]), bool(row["is_admin"]), str(row["password_hash"]))
+    if row is None:
+        return None
+    return UserRecord(row["id"], row["is_admin"], row["is_guest"], row["password_hash"])
 
 
 def get_user_id(username: str) -> int | None:
@@ -299,11 +188,11 @@ _USER_SUMMARY_SQL = """
 """
 
 
-def _user_summary(row: sqlite3.Row) -> UserSummary:
+def _user_summary(row: Row) -> UserSummary:
     return UserSummary(
         id=row["id"],
         username=row["username"],
-        isAdmin=bool(row["is_admin"]),
+        isAdmin=row["is_admin"],
         createdAt=row["created_at"],
         boardCount=row["board_count"],
     )
@@ -312,68 +201,71 @@ def _user_summary(row: sqlite3.Row) -> UserSummary:
 def list_users() -> list[UserSummary]:
     with get_connection() as conn:
         rows = conn.execute(
-            f"{_USER_SUMMARY_SQL} GROUP BY u.id ORDER BY u.username COLLATE NOCASE"
+            # Guests are hidden from admins; they expire on their own
+            f"{_USER_SUMMARY_SQL} WHERE NOT u.is_guest GROUP BY u.id ORDER BY lower(u.username)"
         ).fetchall()
         return [_user_summary(row) for row in rows]
 
 
 def get_user_summary(user_id: int) -> UserSummary | None:
     with get_connection() as conn:
-        row = conn.execute(f"{_USER_SUMMARY_SQL} WHERE u.id = ? GROUP BY u.id", (user_id,)).fetchone()
+        row = conn.execute(f"{_USER_SUMMARY_SQL} WHERE u.id = %s GROUP BY u.id", (user_id,)).fetchone()
         return _user_summary(row) if row else None
 
 
 def user_exists(user_id: int) -> bool:
     with get_connection() as conn:
-        return conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
+        return conn.execute("SELECT 1 FROM users WHERE id = %s", (user_id,)).fetchone() is not None
 
 
 def set_admin(user_id: int, admin: bool) -> None:
     with get_connection() as conn:
-        conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(admin), user_id))
+        conn.execute("UPDATE users SET is_admin = %s WHERE id = %s", (admin, user_id))
 
 
 def set_password(user_id: int, password: str) -> None:
+    password_hash = hash_password(password)
     with get_connection() as conn:
         conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (hash_password(password), user_id),
+            "UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, user_id)
         )
 
 
 def delete_user(user_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
 
 
 # Boards
 
 
-# Card count is summed in SQL (JSON1) so listing boards never parses whole board documents
+# Card count is summed in SQL so listing boards never loads whole board documents
 _SUMMARY_SQL = """
     SELECT id, name, updated_at,
-        (SELECT COALESCE(SUM(json_array_length(value, '$.cardIds')), 0)
-         FROM json_each(board_json, '$.columns')) AS card_count
+        (SELECT COALESCE(SUM(jsonb_array_length(col -> 'cardIds')), 0)::int
+         FROM jsonb_array_elements(board_json -> 'columns') AS col) AS card_count
     FROM boards
 """
 
 
-def _summary(row: sqlite3.Row) -> BoardSummary:
+def _summary(row: Row) -> BoardSummary:
     return BoardSummary(
         id=row["id"], name=row["name"], cardCount=row["card_count"], updatedAt=row["updated_at"]
     )
 
 
-def _owned_summary(conn: sqlite3.Connection, user_id: int, board_id: int) -> BoardSummary | None:
+def _owned_summary(
+    conn: psycopg.Connection[Row], user_id: int, board_id: int
+) -> BoardSummary | None:
     row = conn.execute(
-        f"{_SUMMARY_SQL} WHERE id = ? AND user_id = ?", (board_id, user_id)
+        f"{_SUMMARY_SQL} WHERE id = %s AND user_id = %s", (board_id, user_id)
     ).fetchone()
     return _summary(row) if row else None
 
 
 def list_boards(user_id: int) -> list[BoardSummary]:
     with get_connection() as conn:
-        rows = conn.execute(f"{_SUMMARY_SQL} WHERE user_id = ? ORDER BY id", (user_id,)).fetchall()
+        rows = conn.execute(f"{_SUMMARY_SQL} WHERE user_id = %s ORDER BY id", (user_id,)).fetchall()
         return [_summary(row) for row in rows]
 
 
@@ -387,26 +279,26 @@ def create_board(
         return summary
 
 
-def _owned_board(conn: sqlite3.Connection, user_id: int, board_id: int) -> sqlite3.Row | None:
+def _owned_board(conn: psycopg.Connection[Row], user_id: int, board_id: int) -> Row | None:
     return conn.execute(
-        "SELECT * FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
+        "SELECT * FROM boards WHERE id = %s AND user_id = %s", (board_id, user_id)
     ).fetchone()
 
 
 def get_board(user_id: int, board_id: int) -> BoardData | None:
     with get_connection() as conn:
         row = _owned_board(conn, user_id, board_id)
-        return BoardData.model_validate_json(row["board_json"]) if row else None
+        return BoardData.model_validate(row["board_json"]) if row else None
 
 
 def save_board(user_id: int, board_id: int, board: BoardData) -> BoardData | None:
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            UPDATE boards SET board_json = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND user_id = ?
+            UPDATE boards SET board_json = %s, updated_at = now()
+            WHERE id = %s AND user_id = %s
             """,
-            (board.model_dump_json(), board_id, user_id),
+            (Jsonb(board.model_dump(mode="json")), board_id, user_id),
         )
         return board if cursor.rowcount else None
 
@@ -415,8 +307,8 @@ def rename_board(user_id: int, board_id: int, name: str) -> BoardSummary | None:
     with get_connection() as conn:
         conn.execute(
             """
-            UPDATE boards SET name = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND user_id = ?
+            UPDATE boards SET name = %s, updated_at = now()
+            WHERE id = %s AND user_id = %s
             """,
             (name, board_id, user_id),
         )
@@ -426,21 +318,23 @@ def rename_board(user_id: int, board_id: int, name: str) -> BoardSummary | None:
 def owns_board(user_id: int, board_id: int) -> bool:
     with get_connection() as conn:
         return conn.execute(
-            "SELECT 1 FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
+            "SELECT 1 FROM boards WHERE id = %s AND user_id = %s", (board_id, user_id)
         ).fetchone() is not None
 
 
 def count_boards(user_id: int) -> int:
     with get_connection() as conn:
-        return conn.execute(
-            "SELECT COUNT(*) FROM boards WHERE user_id = ?", (user_id,)
-        ).fetchone()[0]
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM boards WHERE user_id = %s", (user_id,)
+        ).fetchone()
+    assert row is not None
+    return int(row["n"])
 
 
 def delete_board(user_id: int, board_id: int) -> bool:
     with get_connection() as conn:
         cursor = conn.execute(
-            "DELETE FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
+            "DELETE FROM boards WHERE id = %s AND user_id = %s", (board_id, user_id)
         )
         return cursor.rowcount > 0
 
@@ -448,19 +342,19 @@ def delete_board(user_id: int, board_id: int) -> bool:
 # Conversations
 
 
-def _conversation_summary(row: sqlite3.Row) -> ConversationSummary:
+def _conversation_summary(row: Row) -> ConversationSummary:
     return ConversationSummary(
         id=row["id"], boardId=row["board_id"], title=row["title"], updatedAt=row["updated_at"]
     )
 
 
 def _owned_conversation(
-    conn: sqlite3.Connection, user_id: int, conversation_id: int
-) -> sqlite3.Row | None:
+    conn: psycopg.Connection[Row], user_id: int, conversation_id: int
+) -> Row | None:
     return conn.execute(
         """
         SELECT c.* FROM conversations c JOIN boards b ON b.id = c.board_id
-        WHERE c.id = ? AND b.user_id = ?
+        WHERE c.id = %s AND b.user_id = %s
         """,
         (conversation_id, user_id),
     ).fetchone()
@@ -471,7 +365,7 @@ def list_conversations(user_id: int, board_id: int) -> list[ConversationSummary]
         if _owned_board(conn, user_id, board_id) is None:
             return None
         rows = conn.execute(
-            "SELECT * FROM conversations WHERE board_id = ? ORDER BY updated_at DESC, id DESC",
+            "SELECT * FROM conversations WHERE board_id = %s ORDER BY updated_at DESC, id DESC",
             (board_id,),
         ).fetchall()
         return [_conversation_summary(row) for row in rows]
@@ -483,12 +377,9 @@ def create_conversation(
     with get_connection() as conn:
         if _owned_board(conn, user_id, board_id) is None:
             return None
-        conversation_id = conn.execute(
-            "INSERT INTO conversations (board_id, title) VALUES (?, ?)",
-            (board_id, title or DEFAULT_CONVERSATION_TITLE),
-        ).lastrowid
         row = conn.execute(
-            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+            "INSERT INTO conversations (board_id, title) VALUES (%s, %s) RETURNING *",
+            (board_id, title or DEFAULT_CONVERSATION_TITLE),
         ).fetchone()
         return _conversation_summary(row)
 
@@ -499,13 +390,13 @@ def get_conversation(user_id: int, conversation_id: int) -> ConversationSummary 
         return _conversation_summary(row) if row else None
 
 
-def get_messages(conversation_id: int, limit: int = -1) -> list[ChatMessage]:
-    """Messages oldest first; with a limit, only the most recent ones."""
+def get_messages(conversation_id: int, limit: int | None = None) -> list[ChatMessage]:
+    """Messages oldest first; with a limit, only the most recent ones (LIMIT NULL = all)."""
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT role, content FROM chat_messages WHERE conversation_id = ?
-            ORDER BY id DESC LIMIT ?
+            SELECT role, content FROM chat_messages WHERE conversation_id = %s
+            ORDER BY id DESC LIMIT %s
             """,
             (conversation_id, limit),
         ).fetchall()
@@ -516,19 +407,17 @@ def append_messages(
     conversation_id: int, messages: list[ChatMessage], title: str | None = None
 ) -> ConversationSummary:
     with get_connection() as conn:
-        conn.executemany(
-            "INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, ?, ?)",
-            [(conversation_id, msg.role, msg.content) for msg in messages],
-        )
-        conn.execute(
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO chat_messages (conversation_id, role, content) VALUES (%s, %s, %s)",
+                [(conversation_id, msg.role, msg.content) for msg in messages],
+            )
+        row = conn.execute(
             """
-            UPDATE conversations SET title = COALESCE(?, title), updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            UPDATE conversations SET title = COALESCE(%s::text, title), updated_at = now()
+            WHERE id = %s RETURNING *
             """,
             (title, conversation_id),
-        )
-        row = conn.execute(
-            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
         ).fetchone()
         return _conversation_summary(row)
 
@@ -540,7 +429,7 @@ def rename_conversation(
         if _owned_conversation(conn, user_id, conversation_id) is None:
             return None
         conn.execute(
-            "UPDATE conversations SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE conversations SET title = %s, updated_at = now() WHERE id = %s",
             (title, conversation_id),
         )
         return _conversation_summary(_owned_conversation(conn, user_id, conversation_id))
@@ -550,5 +439,5 @@ def delete_conversation(user_id: int, conversation_id: int) -> bool:
     with get_connection() as conn:
         if _owned_conversation(conn, user_id, conversation_id) is None:
             return False
-        conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        conn.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
         return True
