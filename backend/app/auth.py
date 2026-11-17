@@ -61,6 +61,17 @@ def get_current_user(
     return CurrentUser(id=user.id, username=username, is_admin=user.is_admin)
 
 
+def secure_cookies() -> bool:
+    """Vercel serves only HTTPS, so cookies there are Secure; Docker runs on plain http://localhost."""
+    return bool(os.getenv("VERCEL"))
+
+
+def end_session(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME, path="/", httponly=True, samesite="lax", secure=secure_cookies()
+    )
+
+
 def start_session(response: Response, username: str) -> UserResponse:
     user = db.get_user(username)
     assert user is not None
@@ -74,6 +85,7 @@ def start_session(response: Response, username: str) -> UserResponse:
         samesite="lax",
         max_age=SESSION_MAX_AGE_SECONDS,
         path="/",
+        secure=secure_cookies(),
     )
     return UserResponse(username=username, isAdmin=user.is_admin)
 
@@ -97,7 +109,7 @@ def register(payload: RegisterRequest, response: Response) -> UserResponse:
 
 @router.post("/logout")
 def logout(response: Response) -> dict[str, str]:
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    end_session(response)
     return {"status": "logged_out"}
 
 
@@ -133,5 +145,5 @@ def delete_account(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Password is incorrect"
         )
     db.delete_user(user.id)
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    end_session(response)
     return {"status": "account_deleted"}

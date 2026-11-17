@@ -45,6 +45,21 @@ def test_session_secret_comes_from_the_environment(monkeypatch: pytest.MonkeyPat
     assert other.get("/api/auth/me").status_code == 200
 
 
+def test_cookie_is_secure_only_on_vercel(monkeypatch: pytest.MonkeyPatch) -> None:
+    def cookie_headers() -> list[str]:
+        client = TestClient(app)
+        signed_in = client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        signed_out = client.post("/api/auth/logout")
+        return [res.headers["set-cookie"].lower() for res in (signed_in, signed_out)]
+
+    monkeypatch.delenv("VERCEL", raising=False)
+    assert not any("secure" in header for header in cookie_headers())
+
+    monkeypatch.setenv("VERCEL", "1")
+    for header in cookie_headers():
+        assert "secure" in header and "httponly" in header and "samesite=lax" in header
+
+
 def test_changing_password_signs_out_other_sessions(anon: TestClient) -> None:
     anon.post("/api/auth/register", json={"username": "frank", "password": "first-pass"})
     laptop = TestClient(app)

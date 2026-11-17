@@ -332,10 +332,10 @@ Decisions:
 - [x] Done when: every existing backend test passes unchanged in behavior on Postgres (only SQLite-specific tests removed), and `supabase db reset` applies the migration cleanly from empty
 
 ## Part 26: Serverless-safe configuration
-- [ ] `auth.py`: `SESSION_SECRET_KEY` required at startup everywhere; `data/session_secret` fallback removed; cookie `secure=True` when `VERCEL` is set
-- [ ] `main.py`: startup no longer creates the schema; the static mount stays for Docker
-- [ ] Tests: startup fails without `SESSION_SECRET_KEY`; cookie has `Secure` when `VERCEL` is set and not otherwise; forged-cookie and session-invalidation tests still pass with the env secret; secret-file tests removed
-- [ ] Done when: the container starts with the secret from `.env`, refuses to start without it, and nothing is written to disk at runtime
+- [x] `auth.py`: `SESSION_SECRET_KEY` required at startup everywhere; `data/session_secret` fallback removed; cookie `secure=True` when `VERCEL` is set
+- [x] `main.py`: startup no longer creates the schema; the static mount stays for Docker
+- [x] Tests: startup fails without `SESSION_SECRET_KEY`; cookie has `Secure` when `VERCEL` is set and not otherwise; forged-cookie and session-invalidation tests still pass with the env secret; secret-file tests removed
+- [x] Done when: the container starts with the secret from `.env`, refuses to start without it, and nothing is written to disk at runtime
 
 ## Part 27: Demo guests, cleanup, and AI limits
 - [ ] `POST /api/auth/guest`: creates `guest-<6 random chars>` (`is_guest`, unusable password, sample board), starts the session; `isGuest` added to `UserResponse` and the TS `User` type
