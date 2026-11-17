@@ -27,6 +27,7 @@ for (const [name, viewport] of [
     test("sign-in and registration screens", async ({ page }) => {
       await page.goto("/");
       await expect(page.getByRole("heading", { name: "Sign in to Kanban Studio" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Try the demo" })).toBeVisible();
       await expectNoViolations(page, "sign in");
       await page.getByRole("button", { name: "Create an account" }).click();
       await expectNoViolations(page, "register");
@@ -57,6 +58,16 @@ for (const [name, viewport] of [
       await page.getByRole("button", { name: "AI assistant" }).click();
       await expect(page.getByTestId("ai-chat-sidebar")).toBeVisible();
       await expectNoViolations(page, "chat");
+    });
+
+    test("demo guest board and account menu", async ({ page }) => {
+      await page.goto("/");
+      await page.getByRole("button", { name: "Try the demo" }).click();
+      await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
+      await expectNoViolations(page, "guest board");
+      await page.getByRole("button", { name: /Account menu for guest-/ }).click();
+      await expect(page.getByText("Guest account, deleted after 24 hours")).toBeVisible();
+      await expectNoViolations(page, "guest account menu");
     });
   });
 }

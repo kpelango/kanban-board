@@ -344,6 +344,28 @@ describe("Workspace", () => {
     expect(screen.getByRole("dialog", { name: "Manage users" })).toBeInTheDocument();
   });
 
+  it("tells guests their account is temporary and hides account settings", async () => {
+    setup();
+    const onLogout = vi.fn();
+    render(<Workspace username="guest-ab12cd" isGuest onLogout={onLogout} />);
+    await screen.findByTestId("kanban-board-loaded");
+    await userEvent.click(screen.getByRole("button", { name: "Account menu for guest-ab12cd" }));
+    expect(screen.getByText("Guest account, deleted after 24 hours")).toBeInTheDocument();
+    const menu = screen.getByRole("menu", { name: "Account" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Log out"]);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Log out" }));
+    expect(onLogout).toHaveBeenCalled();
+  });
+
+  it("does not show the guest note to registered users", async () => {
+    setup();
+    render(<Workspace username="user" onLogout={vi.fn()} />);
+    await screen.findByTestId("kanban-board-loaded");
+    await userEvent.click(screen.getByRole("button", { name: "Account menu for user" }));
+    expect(screen.queryByText("Guest account, deleted after 24 hours")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Account settings" })).toBeInTheDocument();
+  });
+
   it("logs out from the account menu", async () => {
     setup();
     const onLogout = vi.fn();

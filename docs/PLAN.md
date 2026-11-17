@@ -346,10 +346,10 @@ Decisions:
 - [x] Done when: a guest created through the running container can use the board and chat, and the cleanup endpoint removes a guest whose `created_at` is backdated
 
 ## Part 28: Frontend demo entry
-- [ ] Sign-in screen: "Try the demo" button ("No sign-up needed. Guest boards are deleted after 24 hours."); replace "Runs locally on your machine"
-- [ ] Account menu for guests: "Guest account, deleted after 24 hours", no Account settings; `tryDemo()` in `lib/api.ts`
-- [ ] Tests: AuthScreen ("Try the demo" signs in, shows a server error if it fails); Workspace (guest menu text, no Account settings for guests); `api.test.ts` for `tryDemo`; Playwright "try the demo" flow (guest lands on the sample board, adds a card, signs out); sign-in screen with the demo button and the guest account menu in `a11y.spec.ts` at desktop and mobile sizes
-- [ ] Done when: screenshots of the sign-in screen and guest menu at desktop and phone width look right, and axe reports no violations
+- [x] Sign-in screen: "Try the demo" button ("No sign-up needed. Guest boards are deleted after 24 hours."); replace "Runs locally on your machine"
+- [x] Account menu for guests: "Guest account, deleted after 24 hours", no Account settings; `tryDemo()` in `lib/api.ts`
+- [x] Tests: AuthScreen ("Try the demo" signs in, shows a server error if it fails); Workspace (guest menu text, no Account settings for guests); `api.test.ts` for `tryDemo`; Playwright "try the demo" flow (guest lands on the sample board, adds a card, signs out); sign-in screen with the demo button and the guest account menu in `a11y.spec.ts` at desktop and mobile sizes
+- [x] Done when: screenshots of the sign-in screen and guest menu at desktop and phone width look right, and axe reports no violations
 
 ## Part 29: Local dev parity
 - [ ] `supabase/config.toml`: pooler enabled in transaction mode; `.env` uses the local pooler `DATABASE_URL`, `SESSION_SECRET_KEY`, `SEED_DEV_USERS=1`; `.env.example` committed

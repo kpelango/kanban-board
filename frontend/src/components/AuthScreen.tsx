@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { errorText, login, register, type User } from "@/lib/api";
-import { BrandMark, ErrorText, buttonPrimary, inputClass, labelClass } from "@/components/ui";
+import { errorText, login, register, tryDemo, type User } from "@/lib/api";
+import {
+  BrandMark,
+  ErrorText,
+  buttonPrimary,
+  buttonSecondary,
+  inputClass,
+  labelClass,
+} from "@/components/ui";
 
 type AuthScreenProps = {
   notice?: string | null;
@@ -55,12 +62,25 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pending, setPending] = useState<"form" | "demo" | null>(null);
+  const isSubmitting = pending === "form";
   const isRegister = mode === "register";
 
   const switchMode = () => {
     setMode(isRegister ? "signin" : "register");
     setError(null);
+  };
+
+  const run = async (kind: "form" | "demo", action: () => Promise<User>) => {
+    setError(null);
+    setPending(kind);
+    try {
+      onAuthenticated(await action());
+    } catch (err) {
+      setError(errorText(err, "Unable to reach the server. Try again."));
+    } finally {
+      setPending(null);
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -71,16 +91,7 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
       setError(validationError);
       return;
     }
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      const user = isRegister ? await register(trimmed, password) : await login(trimmed, password);
-      onAuthenticated(user);
-    } catch (err) {
-      setError(errorText(err, "Unable to reach the server. Try again."));
-    } finally {
-      setIsSubmitting(false);
-    }
+    await run("form", () => (isRegister ? register(trimmed, password) : login(trimmed, password)));
   };
 
   return (
@@ -100,7 +111,9 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
             reshuffle cards for you.
           </p>
         </div>
-        <span className="hidden text-sm text-white/50 lg:block">Runs locally on your machine</span>
+        <span className="hidden text-sm text-white/50 lg:block">
+          A public demo. Keep private information off your boards.
+        </span>
       </aside>
 
       <main className="flex flex-1 items-start justify-center px-5 py-10 sm:items-center">
@@ -158,7 +171,7 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
 
             {error && <ErrorText>{error}</ErrorText>}
 
-            <button type="submit" disabled={isSubmitting} className={`${buttonPrimary} w-full py-2.5`}>
+            <button type="submit" disabled={pending !== null} className={`${buttonPrimary} w-full py-2.5`}>
               {isRegister
                 ? isSubmitting
                   ? "Creating account..."
@@ -168,6 +181,21 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
                   : "Sign in"}
             </button>
           </form>
+
+          <div className="mt-8 border-t border-stroke pt-6">
+            <button
+              type="button"
+              onClick={() => run("demo", tryDemo)}
+              disabled={pending !== null}
+              aria-describedby="demo-hint"
+              className={`${buttonSecondary} w-full py-2.5`}
+            >
+              {pending === "demo" ? "Starting demo..." : "Try the demo"}
+            </button>
+            <p id="demo-hint" className="mt-2 text-sm text-muted">
+              No sign-up needed. Guest boards are deleted after 24 hours.
+            </p>
+          </div>
 
           <p className="mt-6 text-[15px] text-ink-soft">
             {isRegister ? "Already have an account? " : "New here? "}

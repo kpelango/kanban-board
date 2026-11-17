@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.BASE_URL ?? "http://127.0.0.1:8000";
+// Protected Vercel previews let automated tests through with this secret
+const bypassSecret = process.env.VERCEL_BYPASS;
 
 export default defineConfig({
   testDir: "./tests",
@@ -13,6 +15,13 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "retain-on-failure",
+    extraHTTPHeaders: bypassSecret
+      ? {
+          "x-vercel-protection-bypass": bypassSecret,
+          // Sets a cookie so later requests from the page (fetches, assets) are let through too
+          "x-vercel-set-bypass-cookie": "samesitenone",
+        }
+      : undefined,
   },
   projects: [
     {

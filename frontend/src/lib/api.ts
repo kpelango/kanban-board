@@ -100,6 +100,10 @@ export const login = (username: string, password: string) =>
 export const register = (username: string, password: string) =>
   request<User>("/api/auth/register", { method: "POST", body: { username, password } });
 
+/** Starts a throwaway guest account with the sample board; it is deleted after 24 hours. */
+export const tryDemo = () =>
+  request<User>("/api/auth/guest", { method: "POST" }, "Could not start the demo. Try again.");
+
 export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
 
 export const changePassword = (currentPassword: string, newPassword: string) =>
