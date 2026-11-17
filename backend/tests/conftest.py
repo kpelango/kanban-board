@@ -51,6 +51,8 @@ def test_database() -> Iterator[None]:
 def clean_database(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test starts with only the seeded dev accounts."""
     monkeypatch.setenv("SEED_DEV_USERS", "1")
+    for name in ("CRON_SECRET", "AI_DAILY_LIMIT", "AI_DAILY_LIMIT_GUEST", "VERCEL"):
+        monkeypatch.delenv(name, raising=False)  # tests opt in to these explicitly
     with db.get_connection() as conn:
         conn.execute(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE")
     db.seed_dev_users()
@@ -72,6 +74,23 @@ def client() -> TestClient:
 @pytest.fixture
 def anon() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture
+def guest() -> TestClient:
+    """A client signed in as a brand-new demo guest."""
+    test_client = TestClient(app)
+    assert test_client.post("/api/auth/guest").status_code == 201
+    return test_client
+
+
+def backdate(table: str, column: str, where: str, params: tuple, hours: float) -> None:
+    """Moves timestamps into the past, e.g. to make a guest look a day old."""
+    with db.get_connection() as conn:
+        conn.execute(
+            f"UPDATE {table} SET {column} = {column} - make_interval(secs => %s) WHERE {where}",
+            (hours * 3600, *params),
+        )
 
 
 def first_board_id(client: TestClient) -> int:

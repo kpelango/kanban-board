@@ -2,7 +2,7 @@ import copy
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 FIXED_COLUMN_IDS = (
     "col-backlog",
@@ -106,9 +106,19 @@ class Credentials(BaseModel):
     password: str
 
 
+GUEST_PREFIX = "guest-"
+
+
 class RegisterRequest(BaseModel):
     username: Username
     password: Password
+
+    @field_validator("username")
+    @classmethod
+    def not_a_guest_name(cls, username: str) -> str:
+        if username.lower().startswith(GUEST_PREFIX):
+            raise ValueError(f"Usernames starting with {GUEST_PREFIX} are reserved for demo accounts")
+        return username
 
 
 class ChangePasswordRequest(BaseModel):
@@ -123,6 +133,7 @@ class DeleteAccountRequest(BaseModel):
 class UserResponse(BaseModel):
     username: str
     isAdmin: bool = False
+    isGuest: bool = False
 
 
 class UserSummary(BaseModel):

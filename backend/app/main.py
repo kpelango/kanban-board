@@ -9,6 +9,7 @@ from app.ai import board_conversations_router, conversations_router, router as a
 from app.admin import router as admin_router
 from app.auth import router as auth_router
 from app.board import router as board_router
+from app.cron import router as cron_router
 from app import db
 from app.auth import get_serializer
 
@@ -34,6 +35,7 @@ app.include_router(board_router)
 app.include_router(ai_router)
 app.include_router(board_conversations_router)
 app.include_router(conversations_router)
+app.include_router(cron_router)
 
 
 @app.get("/api/health")

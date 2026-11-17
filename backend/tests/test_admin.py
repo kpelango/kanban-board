@@ -20,7 +20,7 @@ def registered(username: str, password: str = "password1") -> TestClient:
 
 
 def test_seeded_user_is_the_only_admin(client: TestClient) -> None:
-    assert client.get("/api/auth/me").json() == {"username": "user", "isAdmin": True}
+    assert client.get("/api/auth/me").json() == {"username": "user", "isAdmin": True, "isGuest": False}
     users = {u["username"]: u for u in client.get("/api/admin/users").json()}
     assert users["user"]["isAdmin"] is True
     assert users["e2e-test-user"]["isAdmin"] is False
@@ -37,7 +37,7 @@ def test_admin_api_requires_admin(anon: TestClient) -> None:
     assert regular.put(
         f"/api/admin/users/{target}/password", json={"newPassword": "hijacked1"}
     ).status_code == 403
-    assert regular.patch(f"/api/admin/users/{target}", json={"isAdmin": False}).status_code == 403
+    assert regular.patch(f"/api/admin/users/{target}", json={"isAdmin": False, "isGuest": False}).status_code == 403
     assert regular.delete(f"/api/admin/users/{target}").status_code == 403
     # Unknown ids look the same as known ones to non-admins
     assert regular.delete("/api/admin/users/9999").status_code == 403
@@ -62,20 +62,20 @@ def test_admin_resets_a_password(client: TestClient) -> None:
 def test_admin_grants_and_removes_admin(client: TestClient) -> None:
     dave = registered("dave")
     target = user_id("dave")
-    granted = client.patch(f"/api/admin/users/{target}", json={"isAdmin": True})
+    granted = client.patch(f"/api/admin/users/{target}", json={"isAdmin": True, "isGuest": False})
     assert granted.status_code == 200
     assert granted.json()["isAdmin"] is True
     assert dave.get("/api/auth/me").json()["isAdmin"] is True
     assert dave.get("/api/admin/users").status_code == 200
 
-    removed = client.patch(f"/api/admin/users/{target}", json={"isAdmin": False})
+    removed = client.patch(f"/api/admin/users/{target}", json={"isAdmin": False, "isGuest": False})
     assert removed.json()["isAdmin"] is False
     assert dave.get("/api/admin/users").status_code == 403
 
 
 def test_admin_cannot_demote_or_delete_self(client: TestClient) -> None:
     me = user_id("user")
-    demote = client.patch(f"/api/admin/users/{me}", json={"isAdmin": False})
+    demote = client.patch(f"/api/admin/users/{me}", json={"isAdmin": False, "isGuest": False})
     assert demote.status_code == 400
     assert demote.json() == {"detail": "You cannot remove admin rights from your own account here"}
     assert client.delete(f"/api/admin/users/{me}").status_code == 400

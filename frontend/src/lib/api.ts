@@ -82,7 +82,7 @@ const request = async <T>(
 
 // Auth
 
-export type User = { username: string; isAdmin: boolean };
+export type User = { username: string; isAdmin: boolean; isGuest: boolean };
 
 export type UserSummary = {
   id: number;

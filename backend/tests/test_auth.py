@@ -34,10 +34,10 @@ def test_login_me_and_logout_flow(anon: TestClient) -> None:
         "/api/auth/login", json={"username": "user", "password": "password"}
     )
     assert login_response.status_code == 200
-    assert login_response.json() == {"username": "user", "isAdmin": True}
+    assert login_response.json() == {"username": "user", "isAdmin": True, "isGuest": False}
     assert "pm_session" in login_response.cookies
 
-    assert anon.get("/api/auth/me").json() == {"username": "user", "isAdmin": True}
+    assert anon.get("/api/auth/me").json() == {"username": "user", "isAdmin": True, "isGuest": False}
     assert anon.post("/api/auth/logout").json() == {"status": "logged_out"}
     assert anon.get("/api/auth/me").status_code == 401
 
@@ -54,8 +54,8 @@ def test_passwords_are_salted_hashes() -> None:
 def test_register_creates_user_with_default_board_and_session(anon: TestClient) -> None:
     res = anon.post("/api/auth/register", json={"username": "alice", "password": "s3cret-pass"})
     assert res.status_code == 201
-    assert res.json() == {"username": "alice", "isAdmin": False}
-    assert anon.get("/api/auth/me").json() == {"username": "alice", "isAdmin": False}
+    assert res.json() == {"username": "alice", "isAdmin": False, "isGuest": False}
+    assert anon.get("/api/auth/me").json() == {"username": "alice", "isAdmin": False, "isGuest": False}
 
     boards = anon.get("/api/boards").json()
     assert len(boards) == 1

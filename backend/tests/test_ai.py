@@ -16,7 +16,7 @@ from app.ai import (
 )
 from app.main import app
 from app.schemas import board_template
-from tests.conftest import first_board_id, login
+from tests.conftest import backdate, first_board_id, login
 
 
 class FakeOpenRouter:
@@ -312,3 +312,78 @@ def test_get_messages_limit_returns_the_most_recent_in_order(client: TestClient)
     recent = db.get_messages(conversation["id"], limit=2)
     assert [m.content for m in recent] == ["m3", "m4"]
     assert len(db.get_messages(conversation["id"])) == 5
+
+
+# Daily limits and the admin-only test endpoint
+
+
+def send(client: TestClient, conversation_id: int, text: str = "Hi") -> int:
+    return client.post(f"/api/conversations/{conversation_id}/messages", json={"message": text}).status_code
+
+
+def test_ai_test_endpoint_is_admin_only(guest: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeOpenRouter(monkeypatch)
+    regular = TestClient(app)
+    login(regular, "e2e-test-user")
+    assert regular.post("/api/ai/test", json={"prompt": "Hi"}).status_code == 403
+    assert guest.post("/api/ai/test", json={"prompt": "Hi"}).status_code == 403
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("who, env, default", [("guest", "AI_DAILY_LIMIT_GUEST", 10), ("registered", "AI_DAILY_LIMIT", 30)])
+def test_daily_limit_blocks_the_next_message_without_calling_ai(
+    who: str, env: str, default: int, guest: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeOpenRouter(monkeypatch)
+    if who == "guest":
+        user = guest
+    else:
+        user = TestClient(app)
+        login(user, "e2e-test-user")
+    conversation_id = new_conversation(user)["id"]
+
+    for _ in range(default):
+        assert send(user, conversation_id) == 200
+    res = user.post(f"/api/conversations/{conversation_id}/messages", json={"message": "One more"})
+    assert res.status_code == 429
+    assert f"all {default} assistant messages" in res.json()["detail"]
+    assert len(fake.calls) == default  # OpenRouter was not called for the blocked message
+
+    monkeypatch.setenv(env, str(default + 1))  # the limit is configurable
+    assert send(user, conversation_id) == 200
+
+
+def test_limit_counts_per_user_and_survives_deleting_chats(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeOpenRouter(monkeypatch)
+    monkeypatch.setenv("AI_DAILY_LIMIT", "2")
+    first = new_conversation(client)["id"]
+    assert send(client, first) == 200
+    assert client.delete(f"/api/conversations/{first}").status_code == 204
+    second = new_conversation(client)["id"]
+    assert send(client, second) == 200
+    assert send(client, second) == 429  # deleting the first chat did not refund it
+
+    other = TestClient(app)
+    login(other, "e2e-test-user")
+    assert send(other, new_conversation(other)["id"]) == 200  # someone else's budget
+
+
+def test_usage_older_than_a_day_does_not_count(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeOpenRouter(monkeypatch)
+    monkeypatch.setenv("AI_DAILY_LIMIT", "1")
+    conversation_id = new_conversation(client)["id"]
+    assert send(client, conversation_id) == 200
+    assert send(client, conversation_id) == 429
+    backdate("ai_usage", "created_at", "user_id = %s", (db.get_user_id("user"),), hours=24.1)
+    assert send(client, conversation_id) == 200
+
+
+def test_parallel_requests_cannot_exceed_the_limit(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    user_id = db.get_user_id("user")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: db.try_consume_ai_quota(user_id, 3), range(8)))
+    assert results.count(True) == 3

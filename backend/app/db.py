@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.schemas import (
+    GUEST_PREFIX,
     BoardData,
     BoardSummary,
     ChatMessage,
@@ -89,11 +90,18 @@ def get_connection() -> Iterator[psycopg.Connection[Row]]:
 
 
 def _create_user(
-    conn: psycopg.Connection[Row], username: str, password_hash: str, is_admin: bool = False
+    conn: psycopg.Connection[Row],
+    username: str,
+    password_hash: str,
+    is_admin: bool = False,
+    is_guest: bool = False,
 ) -> int:
     row = conn.execute(
-        "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s) RETURNING id",
-        (username, password_hash, is_admin),
+        """
+        INSERT INTO users (username, password_hash, is_admin, is_guest)
+        VALUES (%s, %s, %s, %s) RETURNING id
+        """,
+        (username, password_hash, is_admin, is_guest),
     ).fetchone()
     assert row is not None
     _create_board(conn, row["id"], "My First Board", "sample")
@@ -145,12 +153,66 @@ def authenticate(username: str, password: str) -> str | None:
     """Returns the stored username (its original spelling) when the credentials match."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT username, password_hash FROM users WHERE lower(username) = lower(%s)",
+            # Guests have no usable password and can never sign in again
+            """
+            SELECT username, password_hash FROM users
+            WHERE lower(username) = lower(%s) AND NOT is_guest
+            """,
             (username,),
         ).fetchone()
     if row is None or not check_password(password, row["password_hash"]):
         return None
     return str(row["username"])
+
+
+GUEST_NAME_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"  # no look-alikes (l/1, o/0)
+GUEST_LIFETIME_HOURS = 24
+
+
+def create_guest() -> str:
+    """Creates a demo account with the sample board and returns its username."""
+    password_hash = hash_password(secrets.token_urlsafe(32))  # random, never shown to anyone
+    for _ in range(5):
+        username = GUEST_PREFIX + "".join(secrets.choice(GUEST_NAME_ALPHABET) for _ in range(6))
+        try:
+            with get_connection() as conn:
+                _create_user(conn, username, password_hash, is_guest=True)
+            return username
+        except psycopg.errors.UniqueViolation:
+            continue
+    raise RuntimeError("Could not pick a free guest name")
+
+
+def delete_expired_guests(hours: int = GUEST_LIFETIME_HOURS) -> int:
+    """Deletes guests older than `hours`; their boards, chats, and AI usage cascade."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM users WHERE is_guest AND created_at < now() - make_interval(hours => %s)",
+            (hours,),
+        )
+        return cursor.rowcount
+
+
+def try_consume_ai_quota(user_id: int, limit: int) -> bool:
+    """Records one AI request if the user has made fewer than `limit` in the last 24 hours.
+
+    Locking the user's row makes check-and-record atomic, so parallel requests cannot
+    slip past the limit. Usage is not refunded if the AI call later fails.
+    """
+    with get_connection() as conn:
+        conn.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM ai_usage
+            WHERE user_id = %s AND created_at > now() - interval '24 hours'
+            """,
+            (user_id,),
+        ).fetchone()
+        assert row is not None
+        if row["n"] >= limit:
+            return False
+        conn.execute("INSERT INTO ai_usage (user_id) VALUES (%s)", (user_id,))
+        return True
 
 
 class UserRecord(NamedTuple):

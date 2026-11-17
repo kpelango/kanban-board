@@ -338,12 +338,12 @@ Decisions:
 - [x] Done when: the container starts with the secret from `.env`, refuses to start without it, and nothing is written to disk at runtime
 
 ## Part 27: Demo guests, cleanup, and AI limits
-- [ ] `POST /api/auth/guest`: creates `guest-<6 random chars>` (`is_guest`, unusable password, sample board), starts the session; `isGuest` added to `UserResponse` and the TS `User` type
-- [ ] `GET /api/cron/cleanup-guests`: requires `Authorization: Bearer $CRON_SECRET`; deletes guests older than 24 hours (cascade removes their data)
-- [ ] AI daily limit in `send_message`: count the user's `ai_usage` rows in the last 24 hours; over `AI_DAILY_LIMIT_GUEST` (10) or `AI_DAILY_LIMIT` (30) returns 429 with a readable message; each AI call records a row
-- [ ] `POST /api/ai/test` admin-only; registration rejects the `guest-` prefix; guests get 403 on password change, account deletion, admin endpoints
-- [ ] Tests: guest login (flagged, sample board, session works, two guests get different names); guests cannot use admin endpoints or change a password; cleanup (401 without or with a wrong secret, deletes only guests older than 24 hours together with their boards and chats, leaves registered users alone); AI limit (message N passes and N+1 returns 429 for guests and registered users, OpenRouter is not called once over the limit, usage older than 24 hours does not count, deleting the chat does not reset the count); `/api/ai/test` returns 403 for non-admins; `guest-` names rejected at registration
-- [ ] Done when: a guest created through the running container can use the board and chat, and the cleanup endpoint removes a guest whose `created_at` is backdated
+- [x] `POST /api/auth/guest`: creates `guest-<6 random chars>` (`is_guest`, unusable password, sample board), starts the session; `isGuest` added to `UserResponse` and the TS `User` type
+- [x] `GET /api/cron/cleanup-guests`: requires `Authorization: Bearer $CRON_SECRET`; deletes guests older than 24 hours (cascade removes their data)
+- [x] AI daily limit in `send_message`: count the user's `ai_usage` rows in the last 24 hours; over `AI_DAILY_LIMIT_GUEST` (10) or `AI_DAILY_LIMIT` (30) returns 429 with a readable message; each AI call records a row
+- [x] `POST /api/ai/test` admin-only; registration rejects the `guest-` prefix; guests get 403 on password change, account deletion, admin endpoints
+- [x] Tests: guest login (flagged, sample board, session works, two guests get different names); guests cannot use admin endpoints or change a password; cleanup (401 without or with a wrong secret, deletes only guests older than 24 hours together with their boards and chats, leaves registered users alone); AI limit (message N passes and N+1 returns 429 for guests and registered users, OpenRouter is not called once over the limit, usage older than 24 hours does not count, deleting the chat does not reset the count); `/api/ai/test` returns 403 for non-admins; `guest-` names rejected at registration
+- [x] Done when: a guest created through the running container can use the board and chat, and the cleanup endpoint removes a guest whose `created_at` is backdated
 
 ## Part 28: Frontend demo entry
 - [ ] Sign-in screen: "Try the demo" button ("No sign-up needed. Guest boards are deleted after 24 hours."); replace "Runs locally on your machine"

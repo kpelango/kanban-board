@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, ValidationError
 
 from app import db
+from app.admin import require_admin
 from app.auth import CurrentUser, get_current_user
 from app.board import not_found as board_not_found
 from app.schemas import (
@@ -32,6 +33,8 @@ board_conversations_router = APIRouter(
 )
 conversations_router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 MAX_HISTORY_MESSAGES = 20
+DEFAULT_DAILY_LIMIT = 30
+DEFAULT_DAILY_LIMIT_GUEST = 10
 
 KANBAN_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_object",
@@ -185,9 +188,21 @@ def run_kanban_chat(
 @router.post("/test", response_model=AIPromptResponse)
 def test_ai_connectivity(
     payload: AIPromptRequest,
-    _: CurrentUser = Depends(get_current_user),
+    _: CurrentUser = Depends(require_admin),  # bypasses the daily limit, so admins only
 ) -> AIPromptResponse:
     return AIPromptResponse(reply=ask_openrouter(payload.prompt))
+
+
+def daily_limit(user: CurrentUser) -> int:
+    name, default = (
+        ("AI_DAILY_LIMIT_GUEST", DEFAULT_DAILY_LIMIT_GUEST)
+        if user.is_guest
+        else ("AI_DAILY_LIMIT", DEFAULT_DAILY_LIMIT)
+    )
+    try:
+        return int(os.getenv(name, default))
+    except ValueError:
+        return default
 
 
 def conversation_not_found() -> HTTPException:
@@ -258,6 +273,12 @@ def send_message(
     conversation = db.get_conversation(user.id, conversation_id)
     if conversation is None:
         raise conversation_not_found()
+    limit = daily_limit(user)
+    if not db.try_consume_ai_quota(user.id, limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"You have used all {limit} assistant messages for today. Try again tomorrow.",
+        )
     board = db.get_board(user.id, conversation.boardId)
     history = db.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES)
     ai_output = run_kanban_chat(board=board, message=payload.message, history=history)
