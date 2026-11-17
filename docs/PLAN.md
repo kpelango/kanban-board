@@ -352,12 +352,12 @@ Decisions:
 - [x] Done when: screenshots of the sign-in screen and guest menu at desktop and phone width look right, and axe reports no violations
 
 ## Part 29: Local dev parity
-- [ ] `supabase/config.toml`: pooler enabled in transaction mode; `.env` uses the local pooler `DATABASE_URL`, `SESSION_SECRET_KEY`, `SEED_DEV_USERS=1`; `.env.example` committed
-- [ ] `scripts/start-*`: check Supabase is running, pass `DATABASE_URL` via `host.docker.internal` (Linux: `--add-host=host.docker.internal:host-gateway`), drop the `./data` mount
-- [ ] Python 3.12 pinned in `Dockerfile` and `.python-version`
-- [ ] Tests: start script fails with a clear message when Supabase is not running; backend suite passes when connecting through the local pooler (catches prepared-statement problems that a direct connection would hide)
-- [ ] Full local regression: backend, live AI (`pytest -m live_ai`), frontend unit, lint, build, E2E and accessibility against the container
-- [ ] Done when: a fresh clone can follow the README (`supabase start`, `.env` from `.env.example`, `./scripts/start-mac.sh`) and reach a working app with seeded dev users
+- [x] `supabase/config.toml`: pooler enabled in transaction mode; `.env` uses the local pooler `DATABASE_URL`, `SESSION_SECRET_KEY`, `SEED_DEV_USERS=1`; `.env.example` committed
+- [x] `scripts/start-*`: check Supabase is running, pass `DATABASE_URL` via `host.docker.internal` (Linux: `--add-host=host.docker.internal:host-gateway`), drop the `./data` mount
+- [x] Python 3.12 pinned in `Dockerfile` and `.python-version`
+- [x] Tests: start script fails with a clear message when Supabase is not running; backend suite passes when connecting through the local pooler (catches prepared-statement problems that a direct connection would hide)
+- [x] Full local regression: backend, live AI (`pytest -m live_ai`), frontend unit, lint, build, E2E and accessibility against the container
+- [x] Done when: a fresh clone can follow the README (`supabase start`, `.env` from `.env.example`, `./scripts/start-mac.sh`) and reach a working app with seeded dev users
 
 ## Part 30: Vercel project and hosted setup
 - [ ] Root `vercel.json`: `frontend` and `backend` services, backend `maxDuration` 60, rewrites (`/api/(.*)` to backend, then `/(.*)` to frontend), daily cron for guest cleanup
