@@ -360,10 +360,10 @@ Decisions:
 - [x] Done when: a fresh clone can follow the README (`supabase start`, `.env` from `.env.example`, `./scripts/start-mac.sh`) and reach a working app with seeded dev users
 
 ## Part 30: Vercel project and hosted setup
-- [ ] Root `vercel.json`: `frontend` and `backend` services, backend `maxDuration` 60, rewrites (`/api/(.*)` to backend, then `/(.*)` to frontend), daily cron for guest cleanup
-- [ ] Create two Supabase projects (production and preview); `supabase link` and `supabase db push` to each; create the admin with `app.manage` on each
-- [ ] `vercel link`; env vars for Production and Preview (each pointing at its own Supabase project): `DATABASE_URL` (transaction pooler), `SESSION_SECRET_KEY`, `OPENROUTER_API_KEY`, `CRON_SECRET`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST`; create a protection-bypass secret for automated preview tests
-- [ ] Vercel Firewall rate-limit rule on `/api/auth/(login|register|guest)`; spend limit on the OpenRouter key
+- [x] Root `vercel.json`: `frontend` and `backend` services, backend `maxDuration` 60, rewrites (`/api/(.*)` to backend, then `/(.*)` to frontend), daily cron for guest cleanup
+- [x] Create two Supabase projects (production and preview); `supabase link` and `supabase db push` to each; create the admin with `app.manage` on each
+- [x] `vercel link`; env vars for Production and Preview (each pointing at its own Supabase project): `DATABASE_URL` (transaction pooler), `SESSION_SECRET_KEY`, `OPENROUTER_API_KEY`, `CRON_SECRET`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST`; create a protection-bypass secret for automated preview tests
+- [x] Vercel Firewall rate-limit rule on `/api/auth/(login|register|guest)`; spend limit on the OpenRouter key
 - [ ] Tests: `vercel build` succeeds locally for both services; `supabase migration list` shows local and hosted migrations in sync; `/api/health` on the first preview returns 200; a deep link (for example `/?x=1`) and a page refresh return the app, not a 404
 - [ ] Done when: the preview URL loads the sign-in screen, the hosted database has the schema and exactly one admin, and none of the dev accounts exist there
 
