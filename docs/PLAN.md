@@ -366,6 +366,7 @@ Decisions:
 - [x] Vercel Firewall rate-limit rule on `/api/auth/(login|register|guest)`; spend limit on the OpenRouter key
 - [ ] Tests: `vercel build` succeeds locally for both services; `supabase migration list` shows local and hosted migrations in sync; `/api/health` on the first preview returns 200; a deep link (for example `/?x=1`) and a page refresh return the app, not a 404
 - [ ] Done when: the preview URL loads the sign-in screen, the hosted database has the schema and exactly one admin, and none of the dev accounts exist there
+- Notes from setup: the production address is https://kanban-studio-khaki.vercel.app (`kanban-studio.vercel.app` belongs to someone else). Vercel promoted the project's first Git deployment (this branch) to Production, so later pushes to the branch are the Previews. Supabase projects: `kanban-studio-prod` (`avdpubnwnrnpnpvgnmly`) and `kanban-studio-preview` (`klpmjmehpfsdcflycufa`), us-east-1. Local-only secrets (database URLs, generated secrets, bypass) are in the ignored `.secrets/` folder.
 
 ## Part 31: Preview check, production, and docs
 - [ ] Tests on the preview: `BASE_URL=<preview> VERCEL_BYPASS=<secret> npx playwright test tests/demo.spec.ts`; manual checks: "Try the demo", edit a card and reload (saved), send AI messages up to the guest limit (429 message shown), register a normal account, confirm `user`/`password` does not sign in, cron endpoint returns 401 without the secret and 200 with it, sign-in rate limit kicks in after repeated failures, the session cookie is `Secure`
