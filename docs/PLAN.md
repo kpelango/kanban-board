@@ -364,8 +364,8 @@ Decisions:
 - [x] Create two Supabase projects (production and preview); `supabase link` and `supabase db push` to each; create the admin with `app.manage` on each
 - [x] `vercel link`; env vars for Production and Preview (each pointing at its own Supabase project): `DATABASE_URL` (transaction pooler), `SESSION_SECRET_KEY`, `OPENROUTER_API_KEY`, `CRON_SECRET`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST`; create a protection-bypass secret for automated preview tests
 - [x] Vercel Firewall rate-limit rule on `/api/auth/(login|register|guest)`; spend limit on the OpenRouter key
-- [ ] Tests: `vercel build` succeeds locally for both services; `supabase migration list` shows local and hosted migrations in sync; `/api/health` on the first preview returns 200; a deep link (for example `/?x=1`) and a page refresh return the app, not a 404
-- [ ] Done when: the preview URL loads the sign-in screen, the hosted database has the schema and exactly one admin, and none of the dev accounts exist there
+- [x] Tests: `vercel build` succeeds locally for both services; `supabase migration list` shows local and hosted migrations in sync; `/api/health` on the first preview returns 200; a deep link (for example `/?x=1`) and a page refresh return the app, not a 404
+- [x] Done when: the preview URL loads the sign-in screen, the hosted database has the schema and exactly one admin, and none of the dev accounts exist there
 - Notes from setup: the production address is https://kanban-studio-khaki.vercel.app (`kanban-studio.vercel.app` belongs to someone else). Vercel promoted the project's first Git deployment (this branch) to Production, so later pushes to the branch are the Previews. Supabase projects: `kanban-studio-prod` (`avdpubnwnrnpnpvgnmly`) and `kanban-studio-preview` (`klpmjmehpfsdcflycufa`), us-east-1. Local-only secrets (database URLs, generated secrets, bypass) are in the ignored `.secrets/` folder.
 
 ## Part 31: Preview check, production, and docs
