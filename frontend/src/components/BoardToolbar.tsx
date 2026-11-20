@@ -22,7 +22,7 @@ type BoardToolbarProps = {
   onOpenArchive: () => void;
 };
 
-const selectClass = clsx(inputClass, "min-w-0 px-2 text-sm");
+const selectClass = clsx(inputClass, "min-w-0 px-2 text-sm sm:w-auto");
 
 export const BoardToolbar = ({
   board,
