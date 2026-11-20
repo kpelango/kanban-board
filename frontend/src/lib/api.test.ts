@@ -43,6 +43,17 @@ describe("api", () => {
     await expect(tryDemo()).rejects.toThrow("Could not start the demo. Try again.");
   });
 
+  it("explains a rate-limited request that has no message of its own", async () => {
+    mockFetch({ "POST /api/auth/login": () => ({ status: 429, body: {} }) });
+    await expect(login("user", "nope")).rejects.toThrow("Too many attempts. Wait a minute and try again.");
+  });
+
+  it("keeps the server's own message on a 429", async () => {
+    const detail = "You have used all 10 assistant messages for today. Try again tomorrow.";
+    mockFetch({ "POST /api/auth/login": () => ({ status: 429, body: { detail } }) });
+    await expect(login("user", "nope")).rejects.toThrow(detail);
+  });
+
   it("turns validation errors into readable messages", async () => {
     mockFetch({
       "PUT /api/boards/1": () => ({

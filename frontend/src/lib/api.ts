@@ -56,6 +56,9 @@ const errorMessage = (detail: unknown, fallback: string) => {
   return fallback;
 };
 
+/** The hosting firewall answers 429 (no JSON body) when sign-in, sign-up, or demo starts come too fast. */
+const TOO_MANY_ATTEMPTS = "Too many attempts. Wait a minute and try again.";
+
 const request = async <T>(
   url: string,
   options: { method?: string; body?: unknown } = {},
@@ -72,7 +75,8 @@ const request = async <T>(
   }
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new ApiError(errorMessage(data?.detail, fallbackError), response.status);
+    const fallback = response.status === 429 ? TOO_MANY_ATTEMPTS : fallbackError;
+    throw new ApiError(errorMessage(data?.detail, fallback), response.status);
   }
   if (response.status === 204) {
     return undefined as T;
