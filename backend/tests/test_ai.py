@@ -16,7 +16,7 @@ from app.ai import (
 )
 from app.main import app
 from app.schemas import board_template
-from tests.conftest import backdate, first_board_id, login
+from tests.conftest import backdate, first_board_id, login, user_id
 
 
 class FakeOpenRouter:
@@ -376,14 +376,38 @@ def test_usage_older_than_a_day_does_not_count(client: TestClient, monkeypatch: 
     conversation_id = new_conversation(client)["id"]
     assert send(client, conversation_id) == 200
     assert send(client, conversation_id) == 429
-    backdate("ai_usage", "created_at", "user_id = %s", (db.get_user_id("user"),), hours=24.1)
+    backdate("ai_usage", "created_at", "user_id = %s", (user_id("user"),), hours=24.1)
     assert send(client, conversation_id) == 200
 
 
-def test_parallel_requests_cannot_exceed_the_limit(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallel_requests_cannot_exceed_the_limits(client: TestClient) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    user_id = db.get_user_id("user")
+    uid = user_id("user")
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: db.try_consume_ai_quota(user_id, 3), range(8)))
-    assert results.count(True) == 3
+        results = list(pool.map(lambda _: db.try_consume_ai_quota(uid, 3, 100), range(8)))
+    assert results.count(None) == 3
+    other = user_id("e2e-test-user")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: db.try_consume_ai_quota(other, 100, 5), range(8)))
+    assert results.count(None) == 2  # 3 + 2 reaches the site-wide 5
+
+
+def test_site_wide_limit_covers_all_accounts(client: TestClient, guest: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeOpenRouter(monkeypatch)
+    monkeypatch.setenv("AI_DAILY_LIMIT_TOTAL", "2")
+    assert send(client, new_conversation(client)["id"]) == 200
+    guest_chat = new_conversation(guest)["id"]
+    assert send(guest, guest_chat) == 200
+    res = guest.post(f"/api/conversations/{guest_chat}/messages", json={"message": "One more"})
+    assert res.status_code == 429
+    assert res.json()["detail"] == "The assistant has reached today's limit for this demo. Try again tomorrow."
+    assert len(fake.calls) == 2
+
+
+@pytest.mark.parametrize("name", ["AI_DAILY_LIMIT", "AI_DAILY_LIMIT_GUEST", "AI_DAILY_LIMIT_TOTAL"])
+def test_startup_fails_on_a_mistyped_limit(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(name, "30 messages")
+    with pytest.raises(RuntimeError, match=name):
+        with TestClient(app):
+            pass

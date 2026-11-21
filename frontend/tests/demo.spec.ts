@@ -26,7 +26,7 @@ test("a visitor tries the demo, edits the sample board, and signs out", async ({
   await expect(page.getByRole("button", { name: "Edit Demo card" })).toBeVisible();
 
   await page.getByRole("button", { name: /Account menu for guest-/ }).click();
-  await expect(page.getByText("Guest account, deleted after 24 hours")).toBeVisible();
+  await expect(page.getByText("Guest account, expires after 24 hours")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Account settings" })).toHaveCount(0);
   await page.getByRole("menuitem", { name: "Log out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in to Kanban Studio" })).toBeVisible();

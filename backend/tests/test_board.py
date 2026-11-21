@@ -7,17 +7,17 @@ from fastapi.testclient import TestClient
 from app import db
 from app.main import app
 from app.schemas import INITIAL_BOARD_DATA
-from tests.conftest import first_board_id, login
+from tests.conftest import first_board_id, is_admin, login, user_id
 
 
 def test_dev_users_are_seeded_with_a_sample_board() -> None:
-    assert db.is_admin("user")
-    assert not db.is_admin("e2e-test-user")
+    assert is_admin("user")
+    assert not is_admin("e2e-test-user")
     for username in ("user", "e2e-test-user"):
-        user_id = db.get_user_id(username)
-        boards = db.list_boards(user_id)
+        uid = user_id(username)
+        boards = db.list_boards(uid)
         assert len(boards) == 1
-        board = db.get_board(user_id, boards[0].id)
+        board = db.get_board(uid, boards[0].id)
         assert [c.id for c in board.columns] == [
             "col-backlog",
             "col-discovery",
@@ -261,8 +261,8 @@ def test_seeding_is_off_unless_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SEED_DEV_USERS", "1")
     db.seed_dev_users()
     db.seed_dev_users()  # running twice is harmless
-    assert db.is_admin("user")
-    assert len(db.list_boards(db.get_user_id("user"))) == 1
+    assert is_admin("user")
+    assert len(db.list_boards(user_id("user"))) == 1
 
 
 def test_connections_are_returned_to_the_pool(client: TestClient) -> None:
@@ -287,7 +287,7 @@ def test_failed_writes_roll_back() -> None:
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    assert {b.name for b in db.list_boards(db.get_user_id("user"))} == {"My First Board"}
+    assert {b.name for b in db.list_boards(user_id("user"))} == {"My First Board"}
 
 
 def test_board_summary_counts_cards_in_columns_via_sql(client: TestClient) -> None:

@@ -1,8 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app import db
 from app.main import app
-from tests.conftest import login
+from tests.conftest import login, user_id
 
 
 def test_me_requires_authentication(anon: TestClient) -> None:
@@ -40,6 +41,15 @@ def test_login_me_and_logout_flow(anon: TestClient) -> None:
     assert anon.get("/api/auth/me").json() == {"username": "user", "isAdmin": True, "isGuest": False}
     assert anon.post("/api/auth/logout").json() == {"status": "logged_out"}
     assert anon.get("/api/auth/me").status_code == 401
+
+
+def test_unknown_usernames_cost_a_password_check(anon: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    real = db.check_password
+    monkeypatch.setattr(db, "check_password", lambda *args: calls.append(1) or real(*args))
+    res = anon.post("/api/auth/login", json={"username": "nobody-here", "password": "password"})
+    assert res.status_code == 401
+    assert calls == [1]  # same work as a known user, so response time does not reveal names
 
 
 def test_passwords_are_salted_hashes() -> None:
@@ -166,7 +176,7 @@ def test_delete_account_removes_user_data_and_invalidates_session(anon: TestClie
 
     res = anon.request("DELETE", "/api/auth/account", json={"password": "dave-pass"})
     assert res.status_code == 200
-    assert db.get_user_id("dave") is None
+    assert user_id("dave") is None
 
     with db.get_connection() as conn:
         assert conn.execute(

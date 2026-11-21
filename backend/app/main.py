@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.ai import board_conversations_router, conversations_router, router as ai_router
+from app.ai import board_conversations_router, check_ai_limits, conversations_router, router as ai_router
 from app.admin import router as admin_router
 from app.auth import router as auth_router
 from app.board import router as board_router
@@ -23,6 +23,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     get_serializer()  # fail fast when SESSION_SECRET_KEY is missing
+    check_ai_limits()
     db.seed_dev_users()  # no-op unless SEED_DEV_USERS=1
     yield
     db.close_pool()

@@ -41,7 +41,7 @@ Release workflow:
 One-time setup, already done for this project (kept here for a fresh setup):
 
 - Two Supabase projects; apply `supabase/migrations/` to each with `supabase db push --db-url`.
-- A Vercel project linked to the GitHub repo with Production Branch `main`, and environment variables for Production and Preview: `DATABASE_URL` (the Supabase transaction pooler URL, port 6543), `SESSION_SECRET_KEY`, `CRON_SECRET`, `OPENROUTER_API_KEY`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST`. Use a different database URL, session secret, and cron secret per environment.
+- A Vercel project linked to the GitHub repo with Production Branch `main`, and environment variables for Production and Preview: `DATABASE_URL` (the Supabase transaction pooler URL, port 6543), `SESSION_SECRET_KEY`, `CRON_SECRET`, `OPENROUTER_API_KEY`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST` (and optionally `AI_DAILY_LIMIT_TOTAL`, default 500). Use a different database URL, session secret, and cron secret per environment.
 - A Vercel Firewall rate-limit rule: POST to `^/api/auth/(login|register|guest)$`, 10 requests per 60 seconds per IP, answering 429.
 - A Protection Bypass for Automation secret (for the preview tests) and a spend limit on the OpenRouter key.
 - An admin per database: `./scripts/create-admin.sh <prod|preview> <username>` (prompts for the password). Hosted databases have no seeded accounts.

@@ -66,7 +66,7 @@ for (const [name, viewport] of [
       await expect(page.getByTestId("kanban-board-loaded")).toBeVisible();
       await expectNoViolations(page, "guest board");
       await page.getByRole("button", { name: /Account menu for guest-/ }).click();
-      await expect(page.getByText("Guest account, deleted after 24 hours")).toBeVisible();
+      await expect(page.getByText("Guest account, expires after 24 hours")).toBeVisible();
       await expectNoViolations(page, "guest account menu");
     });
   });

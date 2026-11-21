@@ -104,7 +104,7 @@ export const login = (username: string, password: string) =>
 export const register = (username: string, password: string) =>
   request<User>("/api/auth/register", { method: "POST", body: { username, password } });
 
-/** Starts a throwaway guest account with the sample board; it is deleted after 24 hours. */
+/** Starts a throwaway guest account with the sample board; it expires after 24 hours and is deleted by the next daily cleanup. */
 export const tryDemo = () =>
   request<User>("/api/auth/guest", { method: "POST" }, "Could not start the demo. Try again.");
 

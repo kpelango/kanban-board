@@ -7,7 +7,7 @@ from itsdangerous import URLSafeTimedSerializer
 from app import auth, db
 from app.main import app
 from app.schemas import MAX_CARDS
-from tests.conftest import first_board_id, login
+from tests.conftest import first_board_id, login, user_id
 
 
 def forged_cookie(secret: str, username: str = "user", pw: str = "") -> str:
@@ -78,7 +78,7 @@ def test_admin_password_reset_signs_out_the_user(client: TestClient) -> None:
     victim.post("/api/auth/register", json={"username": "gina", "password": "gina-pass"})
     assert victim.get("/api/boards").status_code == 200
 
-    target = db.get_user_id("gina")
+    target = user_id("gina")
     client.put(f"/api/admin/users/{target}/password", json={"newPassword": "admin-set-pass"})
     assert victim.get("/api/boards").status_code == 401
 

@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app import db
 from app.main import app
-from tests.conftest import backdate, first_board_id, login
+from tests.conftest import backdate, first_board_id, login, user_id
 
 GUEST_CREATED = "users", "created_at", "username = %s"
 
@@ -49,7 +49,7 @@ def test_guests_cannot_change_password_delete_account_or_administer(guest: TestC
     assert "Demo accounts" in res.json()["detail"]
     assert guest.request("DELETE", "/api/auth/account", json={"password": "x"}).status_code == 403
     assert guest.get("/api/admin/users").status_code == 403
-    assert guest.delete(f"/api/admin/users/{db.get_user_id('e2e-test-user')}").status_code == 403
+    assert guest.delete(f"/api/admin/users/{user_id('e2e-test-user')}").status_code == 403
 
 
 def test_guests_are_hidden_from_the_admin_user_list(client: TestClient, guest: TestClient) -> None:
@@ -102,3 +102,15 @@ def test_cleanup_deletes_only_guests_older_than_a_day(anon: TestClient, monkeypa
         assert conn.execute("SELECT COUNT(*) AS n FROM boards WHERE id = %s", (old_board,)).fetchone()["n"] == 0
         assert conn.execute("SELECT COUNT(*) AS n FROM conversations WHERE id = %s", (convo,)).fetchone()["n"] == 0
     login(TestClient(app), "e2e-test-user")
+
+
+def test_cleanup_drops_ai_usage_older_than_a_day(anon: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("CRON_SECRET", "cron-secret")
+    uid = user_id("user")
+    for _ in range(2):
+        assert db.try_consume_ai_quota(uid, 10, 10) is None
+    backdate("ai_usage", "created_at", "id = (SELECT min(id) FROM ai_usage)", (), hours=25)
+    assert cleanup(anon, "cron-secret").status_code == 200
+    with db.get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM ai_usage").fetchone()["n"] == 1
+

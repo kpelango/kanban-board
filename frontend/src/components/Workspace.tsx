@@ -258,7 +258,7 @@ export const Workspace = ({ username, isAdmin = false, isGuest = false, onLogout
                   <div className={clsx(popoverClass, "right-0 w-60")}>
                     {isGuest && (
                       <p className="mb-1 border-b border-stroke px-3 pt-1 pb-2.5 text-sm text-muted">
-                        Guest account, deleted after 24 hours
+                        Guest account, expires after 24 hours
                       </p>
                     )}
                     <div role="menu" aria-label="Account">

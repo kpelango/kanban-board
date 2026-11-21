@@ -25,7 +25,7 @@ CREATE TABLE users (
     username text NOT NULL,
     password_hash text NOT NULL,          -- pbkdf2_sha256$<iterations>$<salt hex>$<hash hex>
     is_admin boolean NOT NULL DEFAULT false,
-    is_guest boolean NOT NULL DEFAULT false,  -- demo guest, deleted after 24 hours
+    is_guest boolean NOT NULL DEFAULT false,  -- demo guest, expires after 24 hours
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX idx_users_username_lower ON users (lower(username));
@@ -102,8 +102,8 @@ Validation (Pydantic, `backend/app/schemas.py`):
 ## Demo guests and the AI limit
 
 - `POST /api/auth/guest` inserts a `guest-xxxxxx` user with `is_guest = true`, an unusable random password, and the sample board.
-- `GET /api/cron/cleanup-guests` (daily, Vercel schedule) deletes guests whose `created_at` is more than 24 hours old; their boards, chats, and usage rows cascade.
-- Each assistant message first locks the user's row, counts their `ai_usage` rows from the last 24 hours, and inserts one if under the limit (`AI_DAILY_LIMIT_GUEST`, default 10; `AI_DAILY_LIMIT`, default 30). Otherwise the request gets a 429. Usage is not refunded if the AI call fails.
+- Guest sessions last 24 hours. `GET /api/cron/cleanup-guests` (daily, Vercel schedule) then deletes guests whose `created_at` is more than 24 hours old, so a guest's data is gone within about 48 hours; their boards, chats, and usage rows cascade. The same run deletes `ai_usage` rows older than 24 hours, which no longer count toward any limit.
+- Each assistant message takes a transaction-scoped advisory lock, counts the `ai_usage` rows from the last 24 hours (the user's and everyone's), and inserts one if both are under their limits: per account `AI_DAILY_LIMIT_GUEST` (default 10) or `AI_DAILY_LIMIT` (default 30), and site-wide `AI_DAILY_LIMIT_TOTAL` (default 500), so creating many accounts cannot run up the OpenRouter bill. Otherwise the request gets a 429 naming the limit reached. Usage is not refunded if the AI call fails. Startup fails if a limit is not a whole number.
 
 ## Changing the schema
 

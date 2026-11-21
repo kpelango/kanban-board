@@ -51,7 +51,7 @@ def test_database() -> Iterator[None]:
 def clean_database(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test starts with only the seeded dev accounts."""
     monkeypatch.setenv("SEED_DEV_USERS", "1")
-    for name in ("CRON_SECRET", "AI_DAILY_LIMIT", "AI_DAILY_LIMIT_GUEST", "VERCEL"):
+    for name in ("CRON_SECRET", "AI_DAILY_LIMIT", "AI_DAILY_LIMIT_GUEST", "AI_DAILY_LIMIT_TOTAL", "VERCEL"):
         monkeypatch.delenv(name, raising=False)  # tests opt in to these explicitly
     with db.get_connection() as conn:
         conn.execute(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE")
@@ -91,6 +91,16 @@ def backdate(table: str, column: str, where: str, params: tuple, hours: float) -
             f"UPDATE {table} SET {column} = {column} - make_interval(secs => %s) WHERE {where}",
             (hours * 3600, *params),
         )
+
+
+def user_id(username: str) -> int | None:
+    user = db.get_user(username)
+    return user.id if user else None
+
+
+def is_admin(username: str) -> bool:
+    user = db.get_user(username)
+    return bool(user and user.is_admin)
 
 
 def first_board_id(client: TestClient) -> int:

@@ -350,7 +350,7 @@ describe("Workspace", () => {
     render(<Workspace username="guest-ab12cd" isGuest onLogout={onLogout} />);
     await screen.findByTestId("kanban-board-loaded");
     await userEvent.click(screen.getByRole("button", { name: "Account menu for guest-ab12cd" }));
-    expect(screen.getByText("Guest account, deleted after 24 hours")).toBeInTheDocument();
+    expect(screen.getByText("Guest account, expires after 24 hours")).toBeInTheDocument();
     const menu = screen.getByRole("menu", { name: "Account" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Log out"]);
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Log out" }));
@@ -362,7 +362,7 @@ describe("Workspace", () => {
     render(<Workspace username="user" onLogout={vi.fn()} />);
     await screen.findByTestId("kanban-board-loaded");
     await userEvent.click(screen.getByRole("button", { name: "Account menu for user" }));
-    expect(screen.queryByText("Guest account, deleted after 24 hours")).not.toBeInTheDocument();
+    expect(screen.queryByText("Guest account, expires after 24 hours")).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Account settings" })).toBeInTheDocument();
   });
 

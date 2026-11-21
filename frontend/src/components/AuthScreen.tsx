@@ -193,7 +193,7 @@ export const AuthScreen = ({ notice, onAuthenticated }: AuthScreenProps) => {
               {pending === "demo" ? "Starting demo..." : "Try the demo"}
             </button>
             <p id="demo-hint" className="mt-2 text-sm text-muted">
-              No sign-up needed. Guest boards are deleted after 24 hours.
+              No sign-up needed. Guest accounts expire after 24 hours.
             </p>
           </div>
 

@@ -2,13 +2,7 @@ from fastapi.testclient import TestClient
 
 from app import db
 from app.main import app
-from tests.conftest import login
-
-
-def user_id(username: str) -> int:
-    found = db.get_user_id(username)
-    assert found is not None
-    return found
+from tests.conftest import is_admin, login, user_id
 
 
 def registered(username: str, password: str = "password1") -> TestClient:
@@ -79,14 +73,14 @@ def test_admin_cannot_demote_or_delete_self(client: TestClient) -> None:
     assert demote.status_code == 400
     assert demote.json() == {"detail": "You cannot remove admin rights from your own account here"}
     assert client.delete(f"/api/admin/users/{me}").status_code == 400
-    assert db.is_admin("user")
+    assert is_admin("user")
 
 
 def test_admin_deletes_a_user_and_their_data(client: TestClient) -> None:
     erin = registered("erin")
     target = user_id("erin")
     assert client.delete(f"/api/admin/users/{target}").status_code == 204
-    assert db.get_user_id("erin") is None
+    assert user_id("erin") is None
     assert erin.get("/api/boards").status_code == 401
     assert client.delete(f"/api/admin/users/{target}").status_code == 404
     assert client.put(

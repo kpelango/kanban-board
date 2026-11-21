@@ -48,6 +48,9 @@ def check_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(digest.hex(), expected)
 
 
+_DUMMY_HASH = hash_password(secrets.token_hex(16))
+
+
 # Connection pool. The schema comes from supabase/migrations; this module never creates it.
 
 _pool: ConnectionPool | None = None
@@ -160,7 +163,10 @@ def authenticate(username: str, password: str) -> str | None:
             """,
             (username,),
         ).fetchone()
-    if row is None or not check_password(password, row["password_hash"]):
+    if row is None:
+        check_password(password, _DUMMY_HASH)  # same work as a real check, so timing does not reveal names
+        return None
+    if not check_password(password, row["password_hash"]):
         return None
     return str(row["username"])
 
@@ -184,35 +190,44 @@ def create_guest() -> str:
 
 
 def delete_expired_guests(hours: int = GUEST_LIFETIME_HOURS) -> int:
-    """Deletes guests older than `hours`; their boards, chats, and AI usage cascade."""
+    """Deletes guests older than `hours` (their boards, chats, and AI usage cascade) and AI
+    usage rows that no longer count toward any limit. Returns the number of guests deleted."""
     with get_connection() as conn:
         cursor = conn.execute(
             "DELETE FROM users WHERE is_guest AND created_at < now() - make_interval(hours => %s)",
             (hours,),
         )
+        conn.execute(f"DELETE FROM ai_usage WHERE created_at < now() - {AI_WINDOW}")
         return cursor.rowcount
 
 
-def try_consume_ai_quota(user_id: int, limit: int) -> bool:
-    """Records one AI request if the user has made fewer than `limit` in the last 24 hours.
+AI_WINDOW = "interval '24 hours'"
+_AI_QUOTA_LOCK = 7_310_001  # any constant; names the advisory lock below
 
-    Locking the user's row makes check-and-record atomic, so parallel requests cannot
-    slip past the limit. Usage is not refunded if the AI call later fails.
+
+def try_consume_ai_quota(user_id: int, limit: int, site_limit: int) -> str | None:
+    """Records one AI request unless it would pass the user's or the site-wide limit for the
+    last 24 hours. Returns None when recorded, else "user" or "site" for the limit reached.
+
+    One transaction-scoped lock makes check-and-record atomic, so parallel requests cannot
+    slip past either limit. Usage is not refunded if the AI call later fails.
     """
     with get_connection() as conn:
-        conn.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_AI_QUOTA_LOCK,))
         row = conn.execute(
-            """
-            SELECT COUNT(*) AS n FROM ai_usage
-            WHERE user_id = %s AND created_at > now() - interval '24 hours'
+            f"""
+            SELECT COUNT(*) FILTER (WHERE user_id = %s) AS mine, COUNT(*) AS total
+            FROM ai_usage WHERE created_at > now() - {AI_WINDOW}
             """,
             (user_id,),
         ).fetchone()
         assert row is not None
-        if row["n"] >= limit:
-            return False
+        if row["mine"] >= limit:
+            return "user"
+        if row["total"] >= site_limit:
+            return "site"
         conn.execute("INSERT INTO ai_usage (user_id) VALUES (%s)", (user_id,))
-        return True
+        return None
 
 
 class UserRecord(NamedTuple):
@@ -232,16 +247,6 @@ def get_user(username: str) -> UserRecord | None:
     if row is None:
         return None
     return UserRecord(row["id"], row["is_admin"], row["is_guest"], row["password_hash"])
-
-
-def get_user_id(username: str) -> int | None:
-    user = get_user(username)
-    return user.id if user else None
-
-
-def is_admin(username: str) -> bool:
-    user = get_user(username)
-    return bool(user and user.is_admin)
 
 
 _USER_SUMMARY_SQL = """

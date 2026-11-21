@@ -27,7 +27,7 @@ For the MVP, this will run locally (in a docker container). Phase 3 also puts it
 - Postgres on Supabase for the database; the schema lives in `supabase/migrations/`. Local development and tests use the Supabase CLI (`npx supabase start`)
 - Locally, everything runs in one Docker container (FastAPI also serves the static site at /), with start and stop scripts for Mac, PC, Linux in scripts/
 - Hosted as a public demo on Vercel: one project with two services (`frontend` static site, `backend` FastAPI) defined in `vercel.json`. Every branch push gets a protected preview deployment on the preview Supabase project; `main` deploys to production on the production Supabase project
-- Public demo safeguards: "Try the demo" guest accounts deleted after 24 hours by a daily Vercel schedule, a daily AI message limit per account, a Vercel Firewall rate limit on sign-in, sign-up, and demo starts, and no seeded accounts on hosted databases
+- Public demo safeguards: "Try the demo" guest accounts that expire after 24 hours and are deleted by a daily Vercel schedule, daily AI message limits per account and for the whole site, a Vercel Firewall rate limit on sign-in, sign-up, and demo starts, and no seeded accounts on hosted databases
 
 ## Starting Point
 

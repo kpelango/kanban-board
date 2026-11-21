@@ -123,7 +123,7 @@ def register(payload: RegisterRequest, response: Response) -> UserResponse:
 
 @router.post("/guest", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def try_demo(response: Response) -> UserResponse:
-    """One-click demo: a throwaway account with the sample board, deleted after 24 hours."""
+    """One-click demo: a throwaway account with the sample board that expires after 24 hours."""
     return start_session(response, db.create_guest())
 
 

@@ -41,7 +41,7 @@ describe("AuthScreen", () => {
     const onAuthenticated = vi.fn();
     render(<AuthScreen onAuthenticated={onAuthenticated} />);
     expect(screen.getByRole("button", { name: "Try the demo" })).toHaveAccessibleDescription(
-      "No sign-up needed. Guest boards are deleted after 24 hours."
+      "No sign-up needed. Guest accounts expire after 24 hours."
     );
     await userEvent.click(screen.getByRole("button", { name: "Try the demo" }));
     expect(onAuthenticated).toHaveBeenCalledWith(guest);
