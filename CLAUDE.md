@@ -16,7 +16,7 @@ Backend (`backend/`, Python 3.12, `uv`):
 - `uv run pytest tests/test_board.py::test_name` - single test. No local `uv`? From the repo root: `docker run --rm --add-host=host.docker.internal:host-gateway -v "$PWD/backend:/w" -v "$PWD/supabase:/supabase" -w /w -e UV_PROJECT_ENVIRONMENT=/tmp/venv -e TEST_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/kanban_test ghcr.io/astral-sh/uv:python3.12-bookworm-slim uv run pytest`
 - `uv run pytest -m live_ai` - live OpenRouter call (needs `OPENROUTER_API_KEY`)
 - `docker exec -e TEST_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/kanban_test pm-app uv run pytest` - run tests inside the container
-- `uv run python -m app.manage create-admin <name>` - create or promote an admin (hosted databases have no seeded accounts)
+- `uv run python -m app.manage create-admin <name>` - create or promote an admin (hosted databases have no seeded accounts); for the hosted databases use `./scripts/create-admin.sh <prod|preview> <name>`
 - `uv run uvicorn app.main:app --reload --port 8000` - local server (serves `backend/static/` at `/` only if it exists)
 
 Frontend (`frontend/`):
@@ -24,9 +24,11 @@ Frontend (`frontend/`):
 - `npm run test:unit` - Vitest; single file: `npx vitest run src/lib/kanban.test.ts`, single test: add `-t "name"`
 - `npm run test:e2e` - Playwright against a running server at `BASE_URL` (default `http://127.0.0.1:8000`, i.e. the container). Single test: `npx playwright test -g "name"`. `tests/a11y.spec.ts` runs axe-core accessibility scans; new screens and dialogs should be added to it.
 
+Hosting (details in README "Hosted demo"): `vercel.json` defines one Vercel project with services `frontend` (static export) and `backend` (FastAPI, `app.main:app`), `/api/*` rewritten to the backend, and a daily schedule for the guest cleanup. Branch pushes build protected previews on the `kanban-studio-preview` Supabase project; `main` deploys production (https://kanban-studio-khaki.vercel.app) on `kanban-studio-prod`. Hosted URLs and secrets live in the gitignored `.secrets/` folder; never print or commit them. The Vercel CLI is used through `npx --yes vercel@66.4.0`.
+
 ## Architecture
 
-- **One container, one origin.** The Dockerfile builds the Next.js app as a static export (`output: "export"`, no SSR, no Next API routes), then copies `frontend/out` into the backend image as `static/`, which FastAPI mounts at `/`. The frontend calls relative `/api/*` URLs, so `npm run dev` alone has no backend; end-to-end work runs against the container, which must be rebuilt (`start-mac.sh`) to pick up changes.
+- **One origin.** Locally, the Dockerfile builds the Next.js app as a static export (`output: "export"`, no SSR, no Next API routes), then copies `frontend/out` into the backend image as `static/`, which FastAPI mounts at `/`; on Vercel the two services share one domain instead. The frontend calls relative `/api/*` URLs, so `npm run dev` alone has no backend; end-to-end work runs against the container, which must be rebuilt (`start-mac.sh`) to pick up changes.
 - **Sessions.** Signed cookie (`itsdangerous`) holding the username and a password-hash fingerprint; the secret comes from `SESSION_SECRET_KEY`, which is required (startup fails without it). The cookie is `Secure` when `VERCEL` is set. Guest sessions last 24 hours. Changing or resetting a password invalidates other sessions.
 - **Ownership chain.** users -> boards -> conversations -> chat_messages, all cascading. `get_current_user` (`backend/app/auth.py`) resolves the cookie to an existing user; every `db.py` function filters by that id and returns `None` for rows the user does not own, which routes turn into 404.
 - **Board documents.** Each board is one JSON `BoardData` document. The frontend `Workspace` holds it, applies edits optimistically, and queues full-board `PUT /api/boards/{id}` saves in order. `backend/app/schemas.py` validates every write: exactly the 5 fixed column ids, card integrity, card `priority`/`dueDate`/`labels`/`checklist`, column `wipLimit`, and the `archived` map (card id -> column to restore to). Board handlers must spread `...prev` so fields like `archived` survive edits. The TypeScript types in `frontend/src/lib/kanban.ts` must stay in sync with these models.

@@ -20,3 +20,5 @@ The start scripts:
 - **Windows**
   - `scripts\start-windows.bat`: the same checks and startup (without the health wait).
   - `scripts\stop-windows.bat`: stops and removes the `pm-app` container.
+- **Hosted databases**
+  - `./scripts/create-admin.sh <prod|preview> <username>`: runs `python -m app.manage create-admin` in the `uv` Docker image against the URL in `.secrets/<env>-database-url`, prompting for the password (so it never appears in shell history). Needs Docker only.
