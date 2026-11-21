@@ -12,7 +12,7 @@ const summary = (id: number, title: string) => ({
   id,
   boardId: 1,
   title,
-  updatedAt: "2026-11-14 10:00:00",
+  updatedAt: "2026-11-14T10:00:00+00:00",
 });
 
 const renderSidebar = (onBoardUpdate = vi.fn()) =>

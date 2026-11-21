@@ -15,18 +15,19 @@ For the MVP, there will only be a user sign in (hardcoded to 'user' and 'passwor
 
 For the MVP, there will only be 1 Kanban board per signed in user.
 
-For the MVP, this will run locally (in a docker container)
+For the MVP, this will run locally (in a docker container). Phase 3 also puts it online as a public demo (see Technical Decisions).
 
 ## Technical Decisions
 
-- NextJS frontend
-- Python FastAPI backend, including serving the static NextJS site at /
-- Everything packaged into a Docker container
-- Use "uv" as the package manager for python in the Docker container
-- Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
+- NextJS frontend, built as a static export
+- Python FastAPI backend
+- Use "uv" as the package manager for python (Python 3.12)
+- Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root (locally) or a Vercel environment variable (hosted)
 - Use `openai/gpt-oss-120b` as the model
-- Use SQLLite local database for the database, creating a new db if it doesn't exist
-- Start and Stop server scripts for Mac, PC, Linux in scripts/
+- Postgres on Supabase for the database; the schema lives in `supabase/migrations/`. Local development and tests use the Supabase CLI (`npx supabase start`)
+- Locally, everything runs in one Docker container (FastAPI also serves the static site at /), with start and stop scripts for Mac, PC, Linux in scripts/
+- Hosted as a public demo on Vercel: one project with two services (`frontend` static site, `backend` FastAPI) defined in `vercel.json`. Every branch push gets a protected preview deployment on the preview Supabase project; `main` deploys to production on the production Supabase project
+- Public demo safeguards: "Try the demo" guest accounts that expire after 24 hours and are deleted by a daily Vercel schedule, daily AI message limits per account and for the whole site, a Vercel Firewall rate limit on sign-in, sign-up, and demo starts, and no seeded accounts on hosted databases
 
 ## Starting Point
 

@@ -54,6 +54,7 @@ export default function Home() {
       key={user.username}
       username={user.username}
       isAdmin={user.isAdmin}
+      isGuest={user.isGuest}
       onLogout={handleLogout}
     />
   );

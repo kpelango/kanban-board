@@ -1,8 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app import db
 from app.main import app
-from tests.conftest import login
+from tests.conftest import login, user_id
 
 
 def test_me_requires_authentication(anon: TestClient) -> None:
@@ -34,12 +35,21 @@ def test_login_me_and_logout_flow(anon: TestClient) -> None:
         "/api/auth/login", json={"username": "user", "password": "password"}
     )
     assert login_response.status_code == 200
-    assert login_response.json() == {"username": "user", "isAdmin": True}
+    assert login_response.json() == {"username": "user", "isAdmin": True, "isGuest": False}
     assert "pm_session" in login_response.cookies
 
-    assert anon.get("/api/auth/me").json() == {"username": "user", "isAdmin": True}
+    assert anon.get("/api/auth/me").json() == {"username": "user", "isAdmin": True, "isGuest": False}
     assert anon.post("/api/auth/logout").json() == {"status": "logged_out"}
     assert anon.get("/api/auth/me").status_code == 401
+
+
+def test_unknown_usernames_cost_a_password_check(anon: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    real = db.check_password
+    monkeypatch.setattr(db, "check_password", lambda *args: calls.append(1) or real(*args))
+    res = anon.post("/api/auth/login", json={"username": "nobody-here", "password": "password"})
+    assert res.status_code == 401
+    assert calls == [1]  # same work as a known user, so response time does not reveal names
 
 
 def test_passwords_are_salted_hashes() -> None:
@@ -54,8 +64,8 @@ def test_passwords_are_salted_hashes() -> None:
 def test_register_creates_user_with_default_board_and_session(anon: TestClient) -> None:
     res = anon.post("/api/auth/register", json={"username": "alice", "password": "s3cret-pass"})
     assert res.status_code == 201
-    assert res.json() == {"username": "alice", "isAdmin": False}
-    assert anon.get("/api/auth/me").json() == {"username": "alice", "isAdmin": False}
+    assert res.json() == {"username": "alice", "isAdmin": False, "isGuest": False}
+    assert anon.get("/api/auth/me").json() == {"username": "alice", "isAdmin": False, "isGuest": False}
 
     boards = anon.get("/api/boards").json()
     assert len(boards) == 1
@@ -97,11 +107,13 @@ def test_duplicate_usernames_are_rejected_by_the_database() -> None:
     assert db.create_user("hank", "password1") is None
     assert db.create_user("HANK", "password1") is None
     with db.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM users WHERE username = 'hank' COLLATE NOCASE").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE lower(username) = 'hank'"
+        ).fetchone()["n"] == 1
         # A failed sign-up leaves no orphaned board behind
         assert conn.execute(
-            "SELECT COUNT(*) FROM boards WHERE user_id NOT IN (SELECT id FROM users)"
-        ).fetchone()[0] == 0
+            "SELECT COUNT(*) AS n FROM boards WHERE user_id NOT IN (SELECT id FROM users)"
+        ).fetchone()["n"] == 0
 
 
 def test_concurrent_registrations_never_error(anon: TestClient) -> None:
@@ -164,13 +176,15 @@ def test_delete_account_removes_user_data_and_invalidates_session(anon: TestClie
 
     res = anon.request("DELETE", "/api/auth/account", json={"password": "dave-pass"})
     assert res.status_code == 200
-    assert db.get_user_id("dave") is None
+    assert user_id("dave") is None
 
     with db.get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM boards WHERE id = ?", (board_id,)).fetchone()[0] == 0
         assert conn.execute(
-            "SELECT COUNT(*) FROM conversations WHERE board_id = ?", (board_id,)
-        ).fetchone()[0] == 0
+            "SELECT COUNT(*) AS n FROM boards WHERE id = %s", (board_id,)
+        ).fetchone()["n"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM conversations WHERE board_id = %s", (board_id,)
+        ).fetchone()["n"] == 0
 
     # A session cookie for a deleted user must stop working
     stale = TestClient(app)

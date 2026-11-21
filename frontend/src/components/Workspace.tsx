@@ -44,10 +44,11 @@ const writeLastBoard = (username: string, boardId: number) => {
 type WorkspaceProps = {
   username: string;
   isAdmin?: boolean;
+  isGuest?: boolean;
   onLogout: () => void;
 };
 
-export const Workspace = ({ username, isAdmin = false, onLogout }: WorkspaceProps) => {
+export const Workspace = ({ username, isAdmin = false, isGuest = false, onLogout }: WorkspaceProps) => {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [board, setBoard] = useState<BoardData | null>(null);
@@ -254,39 +255,48 @@ export const Workspace = ({ username, isAdmin = false, onLogout }: WorkspaceProp
                   <span className="hidden max-w-32 truncate xl:inline">{username}</span>
                 </button>
                 {showAccountMenu && (
-                  <div className={clsx(popoverClass, "right-0 w-52")} role="menu">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowAccountMenu(false);
-                        setShowAccountDialog(true);
-                      }}
-                      className={menuItemClass}
-                    >
-                      Account settings
-                    </button>
-                    {isAdmin && (
+                  <div className={clsx(popoverClass, "right-0 w-60")}>
+                    {isGuest && (
+                      <p className="mb-1 border-b border-stroke px-3 pt-1 pb-2.5 text-sm text-muted">
+                        Guest account, expires after 24 hours
+                      </p>
+                    )}
+                    <div role="menu" aria-label="Account">
+                      {!isGuest && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setShowAccountMenu(false);
+                            setShowAccountDialog(true);
+                          }}
+                          className={menuItemClass}
+                        >
+                          Account settings
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setShowAccountMenu(false);
+                            setShowUsers(true);
+                          }}
+                          className={menuItemClass}
+                        >
+                          Manage users
+                        </button>
+                      )}
                       <button
                         type="button"
                         role="menuitem"
-                        onClick={() => {
-                          setShowAccountMenu(false);
-                          setShowUsers(true);
-                        }}
+                        onClick={onLogout}
                         className={menuItemClass}
                       >
-                        Manage users
+                        Log out
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={onLogout}
-                      className={menuItemClass}
-                    >
-                      Log out
-                    </button>
+                    </div>
                   </div>
                 )}
               </div>

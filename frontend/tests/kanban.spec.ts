@@ -596,7 +596,7 @@ test("chats with the assistant in separate conversations that update the board",
           id: conversationId,
           boardId,
           title: message,
-          updatedAt: "2026-11-14 10:00:00",
+          updatedAt: "2026-11-14T10:00:00+00:00",
         },
       },
     });

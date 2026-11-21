@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, ValidationError
 
 from app import db
+from app.admin import require_admin
 from app.auth import CurrentUser, get_current_user
 from app.board import not_found as board_not_found
 from app.schemas import (
@@ -32,6 +33,9 @@ board_conversations_router = APIRouter(
 )
 conversations_router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 MAX_HISTORY_MESSAGES = 20
+# Assistant messages per rolling 24 hours, overridable by these environment variables.
+# The total covers all accounts together, so creating new accounts cannot run up the bill.
+AI_LIMIT_DEFAULTS = {"AI_DAILY_LIMIT": 30, "AI_DAILY_LIMIT_GUEST": 10, "AI_DAILY_LIMIT_TOTAL": 500}
 
 KANBAN_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_object",
@@ -185,9 +189,22 @@ def run_kanban_chat(
 @router.post("/test", response_model=AIPromptResponse)
 def test_ai_connectivity(
     payload: AIPromptRequest,
-    _: CurrentUser = Depends(get_current_user),
+    _: CurrentUser = Depends(require_admin),  # bypasses the daily limit, so admins only
 ) -> AIPromptResponse:
     return AIPromptResponse(reply=ask_openrouter(payload.prompt))
+
+
+def ai_limit(name: str) -> int:
+    value = os.getenv(name, str(AI_LIMIT_DEFAULTS[name]))
+    if not value.isdigit():
+        raise RuntimeError(f"{name} must be a whole number, not {value!r}")
+    return int(value)
+
+
+def check_ai_limits() -> None:
+    """Called at startup so a mistyped limit fails the deploy instead of the first chat."""
+    for name in AI_LIMIT_DEFAULTS:
+        ai_limit(name)
 
 
 def conversation_not_found() -> HTTPException:
@@ -258,6 +275,15 @@ def send_message(
     conversation = db.get_conversation(user.id, conversation_id)
     if conversation is None:
         raise conversation_not_found()
+    limit = ai_limit("AI_DAILY_LIMIT_GUEST" if user.is_guest else "AI_DAILY_LIMIT")
+    reached = db.try_consume_ai_quota(user.id, limit, ai_limit("AI_DAILY_LIMIT_TOTAL"))
+    if reached:
+        detail = (
+            f"You have used all {limit} assistant messages for today. Try again tomorrow."
+            if reached == "user"
+            else "The assistant has reached today's limit for this demo. Try again tomorrow."
+        )
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
     board = db.get_board(user.id, conversation.boardId)
     history = db.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES)
     ai_output = run_kanban_chat(board=board, message=payload.message, history=history)

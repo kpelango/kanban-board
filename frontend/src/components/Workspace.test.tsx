@@ -14,7 +14,7 @@ const boardSummary = (id: number, name: string, cardCount = 8) => ({
   id,
   name,
   cardCount,
-  updatedAt: "2026-11-14 10:00:00",
+  updatedAt: "2026-11-14T10:00:00+00:00",
 });
 
 let boards: ReturnType<typeof boardSummary>[];
@@ -107,12 +107,12 @@ describe("Workspace", () => {
       "GET /api/boards/1/conversations": () => [],
       "POST /api/boards/1/conversations": () => ({
         status: 201,
-        body: { id: 9, boardId: 1, title: "New conversation", updatedAt: "2026-11-14 10:00:00" },
+        body: { id: 9, boardId: 1, title: "New conversation", updatedAt: "2026-11-14T10:00:00+00:00" },
       }),
       "POST /api/conversations/9/messages": () => ({
         reply: "Seen it.",
         board: null,
-        conversation: { id: 9, boardId: 1, title: "Hi", updatedAt: "2026-11-14 10:00:00" },
+        conversation: { id: 9, boardId: 1, title: "Hi", updatedAt: "2026-11-14T10:00:00+00:00" },
       }),
     });
     render(<Workspace username="user" onLogout={vi.fn()} />);
@@ -342,6 +342,28 @@ describe("Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "Account menu for user" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Manage users" }));
     expect(screen.getByRole("dialog", { name: "Manage users" })).toBeInTheDocument();
+  });
+
+  it("tells guests their account is temporary and hides account settings", async () => {
+    setup();
+    const onLogout = vi.fn();
+    render(<Workspace username="guest-ab12cd" isGuest onLogout={onLogout} />);
+    await screen.findByTestId("kanban-board-loaded");
+    await userEvent.click(screen.getByRole("button", { name: "Account menu for guest-ab12cd" }));
+    expect(screen.getByText("Guest account, expires after 24 hours")).toBeInTheDocument();
+    const menu = screen.getByRole("menu", { name: "Account" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Log out"]);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Log out" }));
+    expect(onLogout).toHaveBeenCalled();
+  });
+
+  it("does not show the guest note to registered users", async () => {
+    setup();
+    render(<Workspace username="user" onLogout={vi.fn()} />);
+    await screen.findByTestId("kanban-board-loaded");
+    await userEvent.click(screen.getByRole("button", { name: "Account menu for user" }));
+    expect(screen.queryByText("Guest account, expires after 24 hours")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Account settings" })).toBeInTheDocument();
   });
 
   it("logs out from the account menu", async () => {

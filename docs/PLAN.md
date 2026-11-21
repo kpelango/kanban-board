@@ -299,3 +299,79 @@ Decisions:
 - [x] E2E and accessibility suite run twice in a row (`--repeat-each=2`) with no failures and no server errors
 - [x] Fixed a registration race found by the repeat run: username uniqueness (ignoring case) is now enforced by a unique index, and a duplicate returns 409 instead of 500
 - [x] Playwright runs with one worker because tests share and reset the `e2e-test-user` account
+
+# Phase 3: Public demo on Vercel + Supabase
+
+Goal: put Kanban Studio online as a public demo anyone can open from a link, with a one-click "Try the demo" guest login and normal registration. Demo data can be thrown away and downtime is tolerable, but strangers must not be able to take over admin or run up the OpenRouter bill. Work happens on branch `feature/vercel-supabase-demo`.
+
+Every part ends with the same gate before the next part starts: tests are written for the part's changes first, then the full suite runs and must pass: backend `pytest` (on the local Supabase Postgres), frontend `vitest`, lint, type check, build, and Playwright E2E plus accessibility scans against a freshly rebuilt container. A part is checked off only when its own "Done when" item is confirmed too.
+
+Decisions:
+- **Hosting**: one Vercel project with two Services (`vercel.json` `services`): `frontend` (the Next.js static export, unchanged) and `backend` (FastAPI, entrypoint `app.main:app`). Top-level rewrites send `/api/(.*)` to the backend and everything else to the frontend, so the site stays on one domain and the same-origin cookie keeps working.
+- **Database**: Supabase Postgres only; no SQLite code path remains. `psycopg` 3 with `psycopg_pool`, connecting through the Supabase transaction pooler (`prepare_threshold=None`). The app keeps its own auth (no Supabase Auth).
+- **Schema**: `supabase/migrations/*.sql`, applied by the Supabase CLI locally (`supabase start` / `db reset`) and to the hosted project (`supabase db push`). The SQLite Phase 1 migration is removed.
+- **No default accounts in production**: `user` and `e2e-test-user` (password `password`) are seeded only when `SEED_DEV_USERS=1` (local and tests). The production admin is created once with `uv run python -m app.manage create-admin <name>`.
+- **Local dev**: Docker stays the local runner, with parity checks. The container connects to the local Supabase pooler like production does, `SESSION_SECRET_KEY` is required everywhere (no file fallback), Docker and Vercel use Python 3.12, and each branch's Vercel preview gets the Playwright suite before production.
+- **Guests**: accounts named `guest-xxxxxx`, deleted 24 hours after creation by a daily Vercel Cron; no conversion to a full account.
+- **AI limits**: per account per rolling 24 hours, 10 messages for guests and 30 for registered users (env-configurable), counted from a separate `ai_usage` table so deleting chats or boards does not reset the count; plus a spend limit on the OpenRouter key. `POST /api/ai/test` becomes admin-only so it cannot be used to call OpenRouter outside the limit.
+- **Guest restrictions**: registration rejects names starting with `guest-`; guests get 403 on password change, account deletion, and admin endpoints.
+- **Environments**: two Supabase projects, one for production and one for Vercel previews, so branch migrations and test runs never touch the live demo.
+- **Data layer approach**: minimal port. `db.py` keeps every public function and signature with Postgres inside (lazy `psycopg_pool` pool, max 10 connections, `dict_row`, `Jsonb`, `RETURNING id`, `lower(username)`); no connection is held during the OpenRouter call. AI usage is reserved atomically before the call (`try_consume_ai_quota`) and not refunded if the call fails. Vercel functions run in the same region as the Supabase project. Tests refuse to run unless the database name ends in `_test`.
+- **Admin user list**: guests are hidden; they expire on their own.
+- **Preview testing**: previews stay behind Vercel Deployment Protection; Playwright sends the protection-bypass secret. Only the anonymous-safe `tests/demo.spec.ts` (the guest demo flow) runs against previews, because the hosted databases have no dev accounts; registration and the rest are checked by hand there, and `a11y.spec.ts` runs locally.
+- **Sign-in abuse**: a Vercel Firewall rate-limit rule on `/api/auth/*` (dashboard setting).
+- **Not in scope**: email password reset, backups, privacy policy, guest-to-account conversion, migrating existing local SQLite data (boards can be moved with Export/Import JSON).
+
+## Part 25: Postgres schema and data layer
+- [x] `supabase init`; migration `supabase/migrations/<timestamp>_init.sql`: `users` (identity id, `is_admin` and `is_guest` booleans, `created_at timestamptz`, unique index on `lower(username)`), `boards` (`board_json jsonb`), `conversations`, `chat_messages` (`created_at`), `ai_usage` (`user_id`, `created_at`), all cascading on delete
+- [x] `backend/pyproject.toml`: add `psycopg[binary]` and `psycopg-pool`; commit `uv.lock`
+- [x] Rewrite `backend/app/db.py` with the same public functions: pooled `get_connection()`, `%s` placeholders, `RETURNING id`, `UniqueViolation` for duplicate usernames, `lower(username)` lookups, jsonb card-count summary, `get_messages(limit=None)` (`LIMIT NULL`), `seed_dev_users()` only when `SEED_DEV_USERS=1`
+- [x] `createdAt`/`updatedAt` become `datetime` in `schemas.py` (ISO with offset); `frontend/src/lib/format.ts` parses ISO
+- [x] `backend/app/manage.py` with `create-admin`
+- [x] Tests: `conftest.py` uses a `kanban_test` database on the local Supabase Postgres (migrations applied once, tables truncated and dev users seeded per test); SQLite-only tests removed; rollback test rewritten; new tests for case-insensitive duplicates, jsonb card count, ISO timestamps, `get_messages` with and without a limit, seeding only when `SEED_DEV_USERS=1`, `create-admin` creating an admin that can sign in; `format.test.ts` updated for ISO timestamps
+- [x] Done when: every existing backend test passes unchanged in behavior on Postgres (only SQLite-specific tests removed), and `supabase db reset` applies the migration cleanly from empty
+
+## Part 26: Serverless-safe configuration
+- [x] `auth.py`: `SESSION_SECRET_KEY` required at startup everywhere; `data/session_secret` fallback removed; cookie `secure=True` when `VERCEL` is set
+- [x] `main.py`: startup no longer creates the schema; the static mount stays for Docker
+- [x] Tests: startup fails without `SESSION_SECRET_KEY`; cookie has `Secure` when `VERCEL` is set and not otherwise; forged-cookie and session-invalidation tests still pass with the env secret; secret-file tests removed
+- [x] Done when: the container starts with the secret from `.env`, refuses to start without it, and nothing is written to disk at runtime
+
+## Part 27: Demo guests, cleanup, and AI limits
+- [x] `POST /api/auth/guest`: creates `guest-<6 random chars>` (`is_guest`, unusable password, sample board), starts the session; `isGuest` added to `UserResponse` and the TS `User` type
+- [x] `GET /api/cron/cleanup-guests`: requires `Authorization: Bearer $CRON_SECRET`; deletes guests older than 24 hours (cascade removes their data)
+- [x] AI daily limit in `send_message`: count the user's `ai_usage` rows in the last 24 hours; over `AI_DAILY_LIMIT_GUEST` (10) or `AI_DAILY_LIMIT` (30) returns 429 with a readable message; each AI call records a row
+- [x] `POST /api/ai/test` admin-only; registration rejects the `guest-` prefix; guests get 403 on password change, account deletion, admin endpoints
+- [x] Tests: guest login (flagged, sample board, session works, two guests get different names); guests cannot use admin endpoints or change a password; cleanup (401 without or with a wrong secret, deletes only guests older than 24 hours together with their boards and chats, leaves registered users alone); AI limit (message N passes and N+1 returns 429 for guests and registered users, OpenRouter is not called once over the limit, usage older than 24 hours does not count, deleting the chat does not reset the count); `/api/ai/test` returns 403 for non-admins; `guest-` names rejected at registration
+- [x] Done when: a guest created through the running container can use the board and chat, and the cleanup endpoint removes a guest whose `created_at` is backdated
+
+## Part 28: Frontend demo entry
+- [x] Sign-in screen: "Try the demo" button ("No sign-up needed. Guest boards are deleted after 24 hours."); replace "Runs locally on your machine"
+- [x] Account menu for guests: "Guest account, deleted after 24 hours", no Account settings; `tryDemo()` in `lib/api.ts`
+- [x] Tests: AuthScreen ("Try the demo" signs in, shows a server error if it fails); Workspace (guest menu text, no Account settings for guests); `api.test.ts` for `tryDemo`; Playwright "try the demo" flow (guest lands on the sample board, adds a card, signs out); sign-in screen with the demo button and the guest account menu in `a11y.spec.ts` at desktop and mobile sizes
+- [x] Done when: screenshots of the sign-in screen and guest menu at desktop and phone width look right, and axe reports no violations
+
+## Part 29: Local dev parity
+- [x] `supabase/config.toml`: pooler enabled in transaction mode; `.env` uses the local pooler `DATABASE_URL`, `SESSION_SECRET_KEY`, `SEED_DEV_USERS=1`; `.env.example` committed
+- [x] `scripts/start-*`: check Supabase is running, pass `DATABASE_URL` via `host.docker.internal` (Linux: `--add-host=host.docker.internal:host-gateway`), drop the `./data` mount
+- [x] Python 3.12 pinned in `Dockerfile` and `.python-version`
+- [x] Tests: start script fails with a clear message when Supabase is not running; backend suite passes when connecting through the local pooler (catches prepared-statement problems that a direct connection would hide)
+- [x] Full local regression: backend, live AI (`pytest -m live_ai`), frontend unit, lint, build, E2E and accessibility against the container
+- [x] Done when: a fresh clone can follow the README (`supabase start`, `.env` from `.env.example`, `./scripts/start-mac.sh`) and reach a working app with seeded dev users
+
+## Part 30: Vercel project and hosted setup
+- [x] Root `vercel.json`: `frontend` and `backend` services, backend `maxDuration` 60, rewrites (`/api/(.*)` to backend, then `/(.*)` to frontend), daily cron for guest cleanup
+- [x] Create two Supabase projects (production and preview); `supabase link` and `supabase db push` to each; create the admin with `app.manage` on each
+- [x] `vercel link`; env vars for Production and Preview (each pointing at its own Supabase project): `DATABASE_URL` (transaction pooler), `SESSION_SECRET_KEY`, `OPENROUTER_API_KEY`, `CRON_SECRET`, `AI_DAILY_LIMIT`, `AI_DAILY_LIMIT_GUEST`; create a protection-bypass secret for automated preview tests
+- [x] Vercel Firewall rate-limit rule on `/api/auth/(login|register|guest)` (10 per minute per IP, answers 429); spend limit on the OpenRouter key
+- [x] Tests: `vercel build` succeeds locally for both services; `supabase migration list` shows local and hosted migrations in sync; `/api/health` on the first preview returns 200; a deep link (for example `/?x=1`) and a page refresh return the app, not a 404
+- [x] Done when: the preview URL loads the sign-in screen, the hosted database has the schema and exactly one admin, and none of the dev accounts exist there
+- Notes from setup: the production address is https://kanban-studio-khaki.vercel.app (`kanban-studio.vercel.app` belongs to someone else). Vercel promoted the project's first Git deployment (this branch) to Production, so later pushes to the branch are the Previews. Supabase projects: `kanban-studio-prod` (`avdpubnwnrnpnpvgnmly`) and `kanban-studio-preview` (`klpmjmehpfsdcflycufa`), us-east-1. Local-only secrets (database URLs, generated secrets, bypass) are in the ignored `.secrets/` folder.
+
+## Part 31: Preview check, production, and docs
+- [x] Tests on the preview: `BASE_URL=<preview> VERCEL_BYPASS=<secret> npx playwright test tests/demo.spec.ts`; manual checks: "Try the demo", edit a card and reload (saved), send AI messages up to the guest limit (429 message shown), register a normal account, confirm `user`/`password` does not sign in, cron endpoint returns 401 without the secret and 200 with it, sign-in rate limit kicks in after repeated failures, the session cookie is `Secure`
+  - Results: demo spec passed on previews at bd05176 and 34049e1 (`om5dim10n`); hand checks on the bd05176 preview (backend unchanged since): guest cookie `HttpOnly; Secure; SameSite=lax; Max-Age=86400`; 10 assistant messages then 429 with the limit message; registration, sign-in, and account deletion work; `user`/`password` returns 401; cron 401/200 (checked in Part 30). The firewall originally answered over-limit requests with 403, which the sign-in screen showed as a generic error, so the rule now answers 429 and the frontend shows "Too many attempts. Wait a minute and try again." for a 429 without a `detail` (verified in the browser on the preview). Also fixed: board filters stacked one per row on wider screens.
+- [x] Review fixes (from the Phase 6 review): site-wide daily AI cap `AI_DAILY_LIMIT_TOTAL` (default 500) checked with the per-account limit under one advisory lock, so creating many accounts cannot run up the OpenRouter bill; the daily cleanup also prunes `ai_usage` rows older than 24 hours; startup fails on a mistyped AI limit; unknown usernames cost a password check (no timing hint); guest copy says "expire after 24 hours" (the daily cleanup deletes the data within about 48); test-only `db` helpers moved to `conftest.py`. Deferred by choice: a per-account board cap.
+- [ ] Production deploy; the same smoke checks on the production URL; the cron shows in the Vercel dashboard and its first run succeeds in the logs
+- [ ] Done when: the production link works for a first-time visitor end to end, and the docs below match what was actually deployed
+- [x] Docs: `AGENTS.md` (Technical Decisions), `CLAUDE.md`, `docs/DATABASE.md`, `backend/AGENTS.md`, `frontend/AGENTS.md`, `scripts/AGENTS.md`, `README.md` (local setup, deploy steps, release workflow)

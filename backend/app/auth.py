@@ -1,9 +1,6 @@
 import hashlib
 import os
-import secrets
 from dataclasses import dataclass
-from functools import cache
-from pathlib import Path
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -19,26 +16,15 @@ from app.schemas import (
 
 SESSION_COOKIE_NAME = "pm_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
-
-
-@cache
-def _secret_from_file(path: Path) -> str:
-    """Reads the generated session secret, creating it (owner-only) on first use."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return path.read_text().strip()
-    with os.fdopen(fd, "w") as handle:
-        secret = secrets.token_urlsafe(32)
-        handle.write(secret)
-    return secret
+GUEST_SESSION_MAX_AGE_SECONDS = 60 * 60 * db.GUEST_LIFETIME_HOURS
 
 
 def get_serializer() -> URLSafeTimedSerializer:
-    secret = os.getenv("SESSION_SECRET_KEY") or _secret_from_file(
-        db.get_db_path().parent / "session_secret"
-    )
+    """Signs session cookies. The secret must come from the environment so every server
+    instance (and every serverless function) shares it."""
+    secret = os.getenv("SESSION_SECRET_KEY")
+    if not secret:
+        raise RuntimeError("SESSION_SECRET_KEY is not set")
     return URLSafeTimedSerializer(secret, salt="pm-auth-session")
 
 
@@ -54,6 +40,7 @@ class CurrentUser:
     id: int
     username: str
     is_admin: bool = False
+    is_guest: bool = False
 
 
 def unauthorized(detail: str) -> HTTPException:
@@ -73,7 +60,29 @@ def get_current_user(
     user = db.get_user(username) if isinstance(username, str) else None
     if user is None or data.get("pw") != password_fingerprint(user.password_hash):
         raise unauthorized("Invalid session")
-    return CurrentUser(id=user.id, username=username, is_admin=user.is_admin)
+    return CurrentUser(
+        id=user.id, username=username, is_admin=user.is_admin, is_guest=user.is_guest
+    )
+
+
+def require_registered(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if user.is_guest:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo accounts cannot do this. Create an account to keep your work.",
+        )
+    return user
+
+
+def secure_cookies() -> bool:
+    """Vercel serves only HTTPS, so cookies there are Secure; Docker runs on plain http://localhost."""
+    return bool(os.getenv("VERCEL"))
+
+
+def end_session(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME, path="/", httponly=True, samesite="lax", secure=secure_cookies()
+    )
 
 
 def start_session(response: Response, username: str) -> UserResponse:
@@ -87,10 +96,12 @@ def start_session(response: Response, username: str) -> UserResponse:
         value=token,
         httponly=True,
         samesite="lax",
-        max_age=SESSION_MAX_AGE_SECONDS,
+        # Guests are deleted after a day, so their cookie should not outlive them
+        max_age=GUEST_SESSION_MAX_AGE_SECONDS if user.is_guest else SESSION_MAX_AGE_SECONDS,
         path="/",
+        secure=secure_cookies(),
     )
-    return UserResponse(username=username, isAdmin=user.is_admin)
+    return UserResponse(username=username, isAdmin=user.is_admin, isGuest=user.is_guest)
 
 
 @router.post("/login", response_model=UserResponse)
@@ -110,22 +121,28 @@ def register(payload: RegisterRequest, response: Response) -> UserResponse:
     return start_session(response, payload.username)
 
 
+@router.post("/guest", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def try_demo(response: Response) -> UserResponse:
+    """One-click demo: a throwaway account with the sample board that expires after 24 hours."""
+    return start_session(response, db.create_guest())
+
+
 @router.post("/logout")
 def logout(response: Response) -> dict[str, str]:
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    end_session(response)
     return {"status": "logged_out"}
 
 
 @router.get("/me", response_model=UserResponse)
 def me(user: CurrentUser = Depends(get_current_user)) -> UserResponse:
-    return UserResponse(username=user.username, isAdmin=user.is_admin)
+    return UserResponse(username=user.username, isAdmin=user.is_admin, isGuest=user.is_guest)
 
 
 @router.put("/password")
 def change_password(
     payload: ChangePasswordRequest,
     response: Response,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_registered),
 ) -> dict[str, str]:
     if db.authenticate(user.username, payload.currentPassword) is None:
         raise HTTPException(
@@ -141,12 +158,12 @@ def change_password(
 def delete_account(
     payload: DeleteAccountRequest,
     response: Response,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_registered),
 ) -> dict[str, str]:
     if db.authenticate(user.username, payload.password) is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Password is incorrect"
         )
     db.delete_user(user.id)
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    end_session(response)
     return {"status": "account_deleted"}

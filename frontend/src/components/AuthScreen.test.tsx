@@ -14,12 +14,12 @@ const fill = async (username: string, password: string) => {
 
 describe("AuthScreen", () => {
   it("signs in with valid credentials", async () => {
-    const { calls } = mockFetch({ "POST /api/auth/login": () => ({ username: "user", isAdmin: true }) });
+    const { calls } = mockFetch({ "POST /api/auth/login": () => ({ username: "user", isAdmin: true, isGuest: false }) });
     const onAuthenticated = vi.fn();
     render(<AuthScreen onAuthenticated={onAuthenticated} />);
     await fill(" user ", "password");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(onAuthenticated).toHaveBeenCalledWith({ username: "user", isAdmin: true });
+    expect(onAuthenticated).toHaveBeenCalledWith({ username: "user", isAdmin: true, isGuest: false });
     expect(calls[0].body).toEqual({ username: "user", password: "password" });
   });
 
@@ -32,6 +32,38 @@ describe("AuthScreen", () => {
     await fill("user", "nope");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid username or password");
+    expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it("starts a guest demo without a username or password", async () => {
+    const guest = { username: "guest-ab12cd", isAdmin: false, isGuest: true };
+    const { calls } = mockFetch({ "POST /api/auth/guest": () => ({ status: 201, body: guest }) });
+    const onAuthenticated = vi.fn();
+    render(<AuthScreen onAuthenticated={onAuthenticated} />);
+    expect(screen.getByRole("button", { name: "Try the demo" })).toHaveAccessibleDescription(
+      "No sign-up needed. Guest accounts expire after 24 hours."
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Try the demo" }));
+    expect(onAuthenticated).toHaveBeenCalledWith(guest);
+    expect(calls.map((call) => call.key)).toEqual(["POST /api/auth/guest"]);
+  });
+
+  it("offers the demo on the registration screen too", async () => {
+    mockFetch({});
+    render(<AuthScreen onAuthenticated={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Create an account" }));
+    expect(screen.getByRole("button", { name: "Try the demo" })).toBeInTheDocument();
+  });
+
+  it("shows the server error when the demo cannot start", async () => {
+    mockFetch({
+      "POST /api/auth/guest": () => ({ status: 503, body: { detail: "Database unavailable" } }),
+    });
+    const onAuthenticated = vi.fn();
+    render(<AuthScreen onAuthenticated={onAuthenticated} />);
+    await userEvent.click(screen.getByRole("button", { name: "Try the demo" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Database unavailable");
+    expect(screen.getByRole("button", { name: "Try the demo" })).toBeEnabled();
     expect(onAuthenticated).not.toHaveBeenCalled();
   });
 
@@ -59,13 +91,13 @@ describe("AuthScreen", () => {
   });
 
   it("registers a new account", async () => {
-    mockFetch({ "POST /api/auth/register": () => ({ status: 201, body: { username: "alice", isAdmin: false } }) });
+    mockFetch({ "POST /api/auth/register": () => ({ status: 201, body: { username: "alice", isAdmin: false, isGuest: false } }) });
     const onAuthenticated = vi.fn();
     render(<AuthScreen onAuthenticated={onAuthenticated} />);
     await userEvent.click(screen.getByRole("button", { name: "Create an account" }));
     await fill("alice", "password1");
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
-    expect(onAuthenticated).toHaveBeenCalledWith({ username: "alice", isAdmin: false });
+    expect(onAuthenticated).toHaveBeenCalledWith({ username: "alice", isAdmin: false, isGuest: false });
   });
 
   it("reports a taken username", async () => {

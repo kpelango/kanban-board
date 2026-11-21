@@ -1,6 +1,4 @@
 import json
-import stat
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,13 +7,7 @@ from itsdangerous import URLSafeTimedSerializer
 from app import auth, db
 from app.main import app
 from app.schemas import MAX_CARDS
-from tests.conftest import first_board_id, login
-
-
-@pytest.fixture(autouse=True)
-def no_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
-    auth._secret_from_file.cache_clear()
+from tests.conftest import first_board_id, login, user_id
 
 
 def forged_cookie(secret: str, username: str = "user", pw: str = "") -> str:
@@ -33,26 +25,17 @@ def test_cookie_signed_with_old_default_secret_is_rejected(anon: TestClient) -> 
     assert anon.get("/api/auth/me").status_code == 401
 
 
-def test_generated_secret_is_private_and_survives_restarts(isolated_db: Path) -> None:
-    client = TestClient(app)
-    login(client)
-    secret_file = isolated_db.parent / "session_secret"
-    assert secret_file.exists()
-    assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
-    assert len(secret_file.read_text()) >= 40
-
-    auth._secret_from_file.cache_clear()  # simulate a server restart
-    assert client.get("/api/auth/me").status_code == 200
+def test_session_secret_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SESSION_SECRET_KEY")
+    with pytest.raises(RuntimeError, match="SESSION_SECRET_KEY"):
+        auth.get_serializer()
+    with pytest.raises(RuntimeError, match="SESSION_SECRET_KEY"):
+        with TestClient(app):  # startup fails fast
+            pass
 
 
-def test_secret_env_var_takes_precedence(
-    isolated_db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_secret_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SESSION_SECRET_KEY", "from-the-environment")
-    client = TestClient(app)
-    login(client)
-    assert not (isolated_db.parent / "session_secret").exists()
-
     password_hash = db.get_user("user").password_hash  # type: ignore[union-attr]
     other = TestClient(app)
     other.cookies.set(
@@ -60,6 +43,21 @@ def test_secret_env_var_takes_precedence(
         forged_cookie("from-the-environment", pw=auth.password_fingerprint(password_hash)),
     )
     assert other.get("/api/auth/me").status_code == 200
+
+
+def test_cookie_is_secure_only_on_vercel(monkeypatch: pytest.MonkeyPatch) -> None:
+    def cookie_headers() -> list[str]:
+        client = TestClient(app)
+        signed_in = client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        signed_out = client.post("/api/auth/logout")
+        return [res.headers["set-cookie"].lower() for res in (signed_in, signed_out)]
+
+    monkeypatch.delenv("VERCEL", raising=False)
+    assert not any("secure" in header for header in cookie_headers())
+
+    monkeypatch.setenv("VERCEL", "1")
+    for header in cookie_headers():
+        assert "secure" in header and "httponly" in header and "samesite=lax" in header
 
 
 def test_changing_password_signs_out_other_sessions(anon: TestClient) -> None:
@@ -80,7 +78,7 @@ def test_admin_password_reset_signs_out_the_user(client: TestClient) -> None:
     victim.post("/api/auth/register", json={"username": "gina", "password": "gina-pass"})
     assert victim.get("/api/boards").status_code == 200
 
-    target = db.get_user_id("gina")
+    target = user_id("gina")
     client.put(f"/api/admin/users/{target}/password", json={"newPassword": "admin-set-pass"})
     assert victim.get("/api/boards").status_code == 401
 

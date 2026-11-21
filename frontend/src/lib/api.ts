@@ -56,6 +56,9 @@ const errorMessage = (detail: unknown, fallback: string) => {
   return fallback;
 };
 
+/** The hosting firewall answers 429 (no JSON body) when sign-in, sign-up, or demo starts come too fast. */
+const TOO_MANY_ATTEMPTS = "Too many attempts. Wait a minute and try again.";
+
 const request = async <T>(
   url: string,
   options: { method?: string; body?: unknown } = {},
@@ -72,7 +75,8 @@ const request = async <T>(
   }
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new ApiError(errorMessage(data?.detail, fallbackError), response.status);
+    const fallback = response.status === 429 ? TOO_MANY_ATTEMPTS : fallbackError;
+    throw new ApiError(errorMessage(data?.detail, fallback), response.status);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -82,7 +86,7 @@ const request = async <T>(
 
 // Auth
 
-export type User = { username: string; isAdmin: boolean };
+export type User = { username: string; isAdmin: boolean; isGuest: boolean };
 
 export type UserSummary = {
   id: number;
@@ -99,6 +103,10 @@ export const login = (username: string, password: string) =>
 
 export const register = (username: string, password: string) =>
   request<User>("/api/auth/register", { method: "POST", body: { username, password } });
+
+/** Starts a throwaway guest account with the sample board; it expires after 24 hours and is deleted by the next daily cleanup. */
+export const tryDemo = () =>
+  request<User>("/api/auth/guest", { method: "POST" }, "Could not start the demo. Try again.");
 
 export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
 

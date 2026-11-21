@@ -12,12 +12,14 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 
-COPY backend/pyproject.toml backend/.python-version ./
-RUN uv sync --no-install-project
+COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
+RUN uv sync --frozen --no-install-project
 
 COPY backend/app ./app
 COPY --from=frontend-builder /frontend/out ./static
 COPY backend/tests ./tests
+# The tests build their database from the same migrations as the hosted projects
+COPY supabase/migrations ./supabase/migrations
 COPY backend/AGENTS.md ./AGENTS.md
 
 EXPOSE 8000

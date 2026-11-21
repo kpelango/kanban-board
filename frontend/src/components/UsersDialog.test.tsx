@@ -4,8 +4,8 @@ import { UsersDialog } from "@/components/UsersDialog";
 import { mockFetch } from "@/test/fetchMock";
 
 const users = () => [
-  { id: 1, username: "user", isAdmin: true, createdAt: "2026-11-01 09:00:00", boardCount: 2 },
-  { id: 2, username: "bob", isAdmin: false, createdAt: "2026-11-02 09:00:00", boardCount: 1 },
+  { id: 1, username: "user", isAdmin: true, createdAt: "2026-11-01T09:00:00+00:00", boardCount: 2 },
+  { id: 2, username: "bob", isAdmin: false, createdAt: "2026-11-02T09:00:00+00:00", boardCount: 1 },
 ];
 
 afterEach(() => {
