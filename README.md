@@ -29,7 +29,7 @@ cd frontend && npm run test:e2e          # end-to-end and accessibility, against
 
 ## Hosted demo (Vercel + Supabase)
 
-`vercel.json` defines one Vercel project with two services: `frontend` (the static export) and `backend` (FastAPI). Requests to `/api/*` go to the backend, everything else to the frontend, so the app stays on one origin. A daily schedule calls `/api/cron/cleanup-guests` to delete demo guests older than 24 hours. Preview deployments use the `kanban-studio-preview` Supabase project; production uses `kanban-studio-prod`.
+`vercel.json` defines one Vercel project with two services: `frontend` (the static export) and `backend` (FastAPI). Requests to `/api/*` go to the backend, everything else to the frontend, so the app stays on one origin. A daily schedule calls `/api/cron/cleanup-guests` to delete demo guests older than 24 hours. Check its runs with `npx vercel schedules executions list cleanup-guests` (`vercel crons ls` does not show schedules). Preview deployments use the `kanban-studio-preview` Supabase project; production uses `kanban-studio-prod`.
 
 Release workflow:
 
