@@ -26,6 +26,18 @@ from app.schemas import (
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "openai/gpt-oss-120b"
+# Pinned to Cerebras with no fallback: unpinned, OpenRouter may route to providers whose
+# completion cap is as low as 4096 tokens (and some take 45 s+), which big planning replies exceed.
+OPENROUTER_PROVIDER: dict[str, Any] = {
+    "only": ["cerebras"],
+    "allow_fallbacks": False,
+    "require_parameters": True,
+}
+# gpt-oss always reasons first and those tokens count toward max_tokens. A full board update
+# is about 3,000 tokens including reasoning, so 16,000 leaves room for large plans
+# (Cerebras allows up to 40,960). The reasoning text itself is not needed, so it is excluded.
+OPENROUTER_REASONING: dict[str, Any] = {"effort": "medium", "exclude": True}
+OPENROUTER_MAX_TOKENS = 16000
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 board_conversations_router = APIRouter(
@@ -74,6 +86,9 @@ def call_openrouter_messages(
     payload: dict[str, Any] = {
         "model": OPENROUTER_MODEL,
         "messages": messages,
+        "provider": OPENROUTER_PROVIDER,
+        "reasoning": OPENROUTER_REASONING,
+        "max_tokens": OPENROUTER_MAX_TOKENS,
     }
     if response_format is not None:
         payload["response_format"] = response_format
@@ -99,17 +114,26 @@ def call_openrouter_messages(
 
     data = response.json()
     try:
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Malformed response from OpenRouter",
         ) from exc
 
-    if not isinstance(content, str):
+    # finish_reason "length" means the token budget ran out (often entirely on reasoning),
+    # leaving the answer missing or cut off mid-JSON. Retrying the same request will not help.
+    if choice.get("finish_reason") == "length":
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Empty content from OpenRouter",
+            detail="The assistant ran out of room before finishing its reply. "
+            "Try asking for a smaller change at a time.",
+        )
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The assistant returned an empty reply. Please try again.",
         )
     return content.strip()
 

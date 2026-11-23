@@ -19,7 +19,7 @@ FastAPI, Uvicorn, Pydantic v2, `python-dotenv`, `itsdangerous` (signed session c
 - `manage.py`: `python -m app.manage create-admin <username>` prompts for a password and creates or promotes an admin (hosted databases have no seeded accounts). `scripts/create-admin.sh` runs it against a hosted database.
 - `admin.py`: `require_admin` dependency (403 otherwise, checked before the target user lookup); `GET /api/admin/users`, `PUT /api/admin/users/{id}/password`, `PATCH /api/admin/users/{id}` (admin flag), `DELETE /api/admin/users/{id}`. Admins cannot demote or delete themselves.
 - `board.py`: `GET/POST /api/boards` (POST takes a `template` or, for duplicate/import, validated `data`), `GET/PUT/PATCH/DELETE /api/boards/{id}` (cannot delete the last board).
-- `ai.py`: OpenRouter client (`openai/gpt-oss-120b`), `POST /api/ai/test` (admins only, not counted), conversations: `GET/POST /api/boards/{id}/conversations`, `GET/PATCH/DELETE /api/conversations/{id}`, `POST /api/conversations/{id}/messages`. A message sends the system prompt (full board JSON), the last 20 messages, and the new message; a returned `updated_board` is validated and saved to the conversation's board. The first message titles a new conversation. Before calling OpenRouter, `db.try_consume_ai_quota` enforces the rolling 24-hour limits (per account: `AI_DAILY_LIMIT_GUEST` 10, `AI_DAILY_LIMIT` 30; site-wide: `AI_DAILY_LIMIT_TOTAL` 500) and returns 429 naming the limit reached.
+- `ai.py`: OpenRouter client (`openai/gpt-oss-120b`, pinned to Cerebras with no fallback, reasoning effort `medium` excluded from the reply, `max_tokens` 16000 because reasoning tokens count toward it; `finish_reason: "length"` or empty content returns a 502 with a readable message), `POST /api/ai/test` (admins only, not counted), conversations: `GET/POST /api/boards/{id}/conversations`, `GET/PATCH/DELETE /api/conversations/{id}`, `POST /api/conversations/{id}/messages`. A message sends the system prompt (full board JSON), the last 20 messages, and the new message; a returned `updated_board` is validated and saved to the conversation's board. The first message titles a new conversation. Before calling OpenRouter, `db.try_consume_ai_quota` enforces the rolling 24-hour limits (per account: `AI_DAILY_LIMIT_GUEST` 10, `AI_DAILY_LIMIT` 30; site-wide: `AI_DAILY_LIMIT_TOTAL` 500) and returns 429 naming the limit reached.
 
 ## Tests (`tests/`)
 
@@ -42,6 +42,6 @@ FastAPI, Uvicorn, Pydantic v2, `python-dotenv`, `itsdangerous` (signed session c
 
 Needs the local Supabase running (`npx supabase start`).
 
-- `uv run pytest` (or, without local `uv`, the `docker run ... ghcr.io/astral-sh/uv` command in `CLAUDE.md`)
+- `uv run pytest` (or, without local `uv`, the `docker run ... ghcr.io/astral-sh/uv` command in the root `AGENTS.md`)
 - `docker exec -e TEST_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/kanban_test pm-app uv run pytest` (inside the running container)
 - Live AI: `uv run pytest -m live_ai` with `OPENROUTER_API_KEY` set

@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: try-prompt-json-cards
+expected_outcome: |
+  A real OpenRouter call to openai/gpt-oss-120b pinned to Cerebras returns JSON with three cards (title and priority each); the answer confirms Cerebras served it and shows the result.

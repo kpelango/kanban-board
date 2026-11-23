@@ -81,6 +81,54 @@ def test_ai_calls_openrouter_with_expected_model_and_headers(
     assert call["json"]["messages"] == [
         {"role": "user", "content": "What is 2+2? Reply with just the number."}
     ]
+    # Pinned to Cerebras with room for reasoning plus a full board reply.
+    assert call["json"]["provider"] == {
+        "only": ["cerebras"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }
+    assert call["json"]["reasoning"] == {"effort": "medium", "exclude": True}
+    assert call["json"]["max_tokens"] >= 16000
+
+
+def reply_with_choice(monkeypatch: pytest.MonkeyPatch, choice: dict) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+
+    def post(url: str, **_: object) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [choice]}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+
+@pytest.mark.parametrize("content", [None, '{"assistant_message": "Here is the pl'])
+def test_reply_cut_off_by_token_limit_returns_clear_502(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, content: str | None
+) -> None:
+    # What OpenRouter returns when reasoning uses up max_tokens: no answer, or a truncated one.
+    reply_with_choice(
+        monkeypatch,
+        {"finish_reason": "length", "message": {"role": "assistant", "content": content}},
+    )
+    conversation = new_conversation(client)
+    res = client.post(
+        f"/api/conversations/{conversation['id']}/messages", json={"message": "Plan my sprint"}
+    )
+    assert res.status_code == 502
+    assert "ran out of room" in res.json()["detail"]
+    # Nothing is stored for a failed reply.
+    assert client.get(f"/api/conversations/{conversation['id']}").json()["messages"] == []
+
+
+@pytest.mark.parametrize("content", [None, "", "   "])
+def test_empty_reply_returns_clear_502(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, content: str | None
+) -> None:
+    reply_with_choice(
+        monkeypatch, {"finish_reason": "stop", "message": {"role": "assistant", "content": content}}
+    )
+    res = client.post("/api/ai/test", json={"prompt": "Hi"})
+    assert res.status_code == 502
+    assert res.json() == {"detail": "The assistant returned an empty reply. Please try again."}
 
 
 def test_openrouter_http_error_returns_502(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,10 +329,20 @@ def test_send_message_validates_input(client: TestClient) -> None:
 
 
 @pytest.mark.live_ai
-def test_live_openrouter_two_plus_two() -> None:
+def test_live_openrouter_two_plus_two_on_cerebras(monkeypatch: pytest.MonkeyPatch) -> None:
     if not os.getenv("OPENROUTER_API_KEY"):
         pytest.skip("OPENROUTER_API_KEY not set in environment")
+    real_post = httpx.post
+    providers: list[str] = []
+
+    def recording_post(*args, **kwargs) -> httpx.Response:
+        response = real_post(*args, **kwargs)
+        providers.append(response.json().get("provider", ""))
+        return response
+
+    monkeypatch.setattr(httpx, "post", recording_post)
     assert "4" in ask_openrouter("What is 2+2? Reply with only the digits.")
+    assert providers == ["Cerebras"]
 
 
 @pytest.mark.live_ai
