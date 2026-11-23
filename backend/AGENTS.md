@@ -42,6 +42,6 @@ FastAPI, Uvicorn, Pydantic v2, `python-dotenv`, `itsdangerous` (signed session c
 
 Needs the local Supabase running (`npx supabase start`).
 
-- `uv run pytest` (or, without local `uv`, the `docker run ... ghcr.io/astral-sh/uv` command in `CLAUDE.md`)
+- `uv run pytest` (or, without local `uv`, the `docker run ... ghcr.io/astral-sh/uv` command in the root `AGENTS.md`)
 - `docker exec -e TEST_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/kanban_test pm-app uv run pytest` (inside the running container)
 - Live AI: `uv run pytest -m live_ai` with `OPENROUTER_API_KEY` set
